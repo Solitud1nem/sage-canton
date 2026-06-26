@@ -1,0 +1,24 @@
+# Daml
+.daml/
+*.dar
+
+# Codegen output
+generated-ts/
+generated-java/
+
+# Node / frontend (added later)
+node_modules/
+dist/
+.next/
+*.log
+
+# Env / secrets — never commit keys, party tokens, JWTs
+.env
+.env.*
+*.jwt
+secrets/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,147 @@
+-- | Daml Script tests for the TaskEscrow state machine.
+--
+-- SKELETON. These exercise the happy path and a couple of guards. The exact Daml
+-- Script idioms (allocateParty / submit / submitMustFail / createCmd / exerciseCmd)
+-- should be verified against the SDK pinned in daml.yaml before relying on these —
+-- see KB platform-canton-network "open items". Run with: dpm test
+
+module Tests.TestTaskEscrow where
+
+-- Daml.Script (3.5.x) exports a `Created` constructor (TransactionTree events) that
+-- clashes with our TaskStatus.Created; hide it since we never inspect tree events here.
+import Daml.Script hiding (Created)
+import DA.Time (addRelTime, seconds)
+import TaskEscrow
+
+-- Allocate the four parties used across tests.
+data Parties = Parties
+  with
+    provider  : Party
+    requester : Party
+    worker    : Party
+    arbiter   : Party
+
+setupParties : Script Parties
+setupParties = do
+  provider  <- allocateParty "provider"
+  requester <- allocateParty "requester"
+  worker    <- allocateParty "worker"
+  arbiter   <- allocateParty "arbiter"
+  pure Parties with ..
+
+-- A freshly created (funded) task in Created state.
+createTask : Parties -> Script (ContractId TaskEscrow)
+createTask p = do
+  now <- getTime
+  submit (actAs [p.provider, p.requester]) do
+    createCmd TaskEscrow with
+      provider  = p.provider
+      requester = p.requester
+      worker    = p.worker
+      arbiter   = p.arbiter
+      taskRef   = "task-spec-hash-001"
+      amount    = 10.0
+      status    = Created
+      deadline  = addRelTime now (seconds 3600)
+      resultRef = None
+
+-- Happy path: Created -> Accepted -> Completed -> Paid.
+testHappyPath : Script ()
+testHappyPath = do
+  p <- setupParties
+  cid <- createTask p
+
+  acceptedCid <- submit p.worker do
+    exerciseCmd cid Accept
+
+  completedCid <- submit p.worker do
+    exerciseCmd acceptedCid Complete with completionRef = "result-artifact-001"
+
+  paidCid <- submit p.requester do
+    exerciseCmd completedCid Approve
+
+  Some task <- queryContractId p.requester paidCid
+  assert (task.status == Paid)
+  pure ()
+
+-- Guard: a worker cannot Accept a task that is not in Created state.
+testCannotAcceptTwice : Script ()
+testCannotAcceptTwice = do
+  p <- setupParties
+  cid <- createTask p
+  acceptedCid <- submit p.worker do exerciseCmd cid Accept
+  -- acceptedCid is now Accepted; Accept again must fail.
+  submitMustFail p.worker do exerciseCmd acceptedCid Accept
+  pure ()
+
+-- Dispute path: Accepted -> Disputed -> arbiter Resolves (refund).
+testDisputeRefund : Script ()
+testDisputeRefund = do
+  p <- setupParties
+  cid <- createTask p
+  acceptedCid <- submit p.worker do exerciseCmd cid Accept
+  disputedCid <- submit p.requester do
+    exerciseCmd acceptedCid Dispute with raisedBy = p.requester
+  refundedCid <- submit p.arbiter do
+    exerciseCmd disputedCid Resolve with payWorker = False
+  Some task <- queryContractId p.arbiter refundedCid
+  assert (task.status == Refunded)
+  pure ()
+
+-- Dispute path: worker raises it, arbiter resolves in the worker's favour -> Paid.
+testDisputePayWorker : Script ()
+testDisputePayWorker = do
+  p <- setupParties
+  cid <- createTask p
+  acceptedCid <- submit p.worker do exerciseCmd cid Accept
+  completedCid <- submit p.worker do
+    exerciseCmd acceptedCid Complete with completionRef = "result-artifact-002"
+  disputedCid <- submit p.worker do
+    exerciseCmd completedCid Dispute with raisedBy = p.worker
+  paidCid <- submit p.arbiter do
+    exerciseCmd disputedCid Resolve with payWorker = True
+  Some task <- queryContractId p.arbiter paidCid
+  assert (task.status == Paid)
+  pure ()
+
+-- Refund path: a never-accepted (Created) task is reclaimed by the requester.
+testRefundUnaccepted : Script ()
+testRefundUnaccepted = do
+  p <- setupParties
+  cid <- createTask p
+  refundedCid <- submit p.requester do exerciseCmd cid Refund
+  Some task <- queryContractId p.requester refundedCid
+  assert (task.status == Refunded)
+  pure ()
+
+-- Expiry path: after the deadline the provider expires the task, then it is refunded.
+testExpireThenRefund : Script ()
+testExpireThenRefund = do
+  p <- setupParties
+  cid <- createTask p
+  -- advance ledger time past the 3600s deadline set in createTask
+  passTime (seconds 3601)
+  expiredCid <- submit p.provider do exerciseCmd cid Expire
+  Some expired <- queryContractId p.provider expiredCid
+  assert (expired.status == Expired)
+  refundedCid <- submit p.requester do exerciseCmd expiredCid Refund
+  Some refunded <- queryContractId p.requester refundedCid
+  assert (refunded.status == Refunded)
+  pure ()
+
+-- Guard: provider cannot Expire before the deadline has passed.
+testCannotExpireEarly : Script ()
+testCannotExpireEarly = do
+  p <- setupParties
+  cid <- createTask p
+  submitMustFail p.provider do exerciseCmd cid Expire
+  pure ()
+
+-- Guard: requester cannot Approve work that has not been Completed.
+testCannotApproveBeforeComplete : Script ()
+testCannotApproveBeforeComplete = do
+  p <- setupParties
+  cid <- createTask p
+  acceptedCid <- submit p.worker do exerciseCmd cid Accept
+  submitMustFail p.requester do exerciseCmd acceptedCid Approve
+  pure ()

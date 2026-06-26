@@ -1,0 +1,104 @@
+-- | sage-canton task escrow.
+--
+-- A privacy-native task-escrow contract for AI agents. A @requester@ funds a task,
+-- a @worker@ (agent) accepts and completes it, and funds release on approval. The
+-- contract is visible ONLY to its stakeholders (requester + provider as signatories,
+-- worker + arbiter as observers) — Canton's sub-transaction privacy means no other
+-- party, and not the synchronizer, can see the terms, amount, or counterparties.
+--
+-- This is a SKELETON. The state machine is real; USDCx settlement (CIP-0056
+-- Allocation / DvP) is marked with TODOs and wired in a later milestone. See
+-- docs/architecture/overview.md and the `platform-canton-network` KB reference.
+--
+-- Design note: we use an explicit @status@ field + consuming choices (archive old
+-- state, create next) to mirror the Sage EVM enum 1:1 and ease the mental jump for
+-- Solidity devs. A more idiomatic Daml alternative is a separate template per state;
+-- revisit if the status-field approach gets unwieldy.
+
+module TaskEscrow where
+
+-- | Lifecycle states, mirroring the Sage EVM TaskEscrow enum.
+data TaskStatus
+  = Created    -- ^ funded, awaiting a worker
+  | Accepted   -- ^ a worker has taken the task
+  | Completed  -- ^ worker submitted a result, awaiting approval
+  | Paid       -- ^ funds released to worker (terminal)
+  | Disputed   -- ^ under arbiter review
+  | Refunded   -- ^ funds returned to requester (terminal)
+  | Expired    -- ^ deadline passed before completion
+  deriving (Eq, Show)
+
+template TaskEscrow
+  with
+    provider  : Party           -- ^ sage-canton app/registry operator; escrow controller + settlement executor
+    requester : Party           -- ^ party that funds the task
+    worker    : Party           -- ^ agent performing the task
+    arbiter   : Party           -- ^ dispute resolver / auditor (observer only)
+    taskRef   : Text            -- ^ off-ledger task spec id / content hash (keep terms off-ledger; store a hash)
+    amount    : Decimal         -- ^ USDCx amount (settlement handles minor units / instrument id)
+    status    : TaskStatus
+    deadline  : Time            -- ^ accept/complete deadline -> Expired
+    resultRef : Optional Text   -- ^ worker's completion artifact id / hash
+  where
+    signatory provider, requester
+    observer worker, arbiter
+
+    -- | Worker accepts an open task.
+    choice Accept : ContractId TaskEscrow
+      controller worker
+      do
+        assertMsg "task must be in Created state" (status == Created)
+        create this with status = Accepted
+
+    -- | Worker submits a completion artifact reference.
+    choice Complete : ContractId TaskEscrow
+      with completionRef : Text
+      controller worker
+      do
+        assertMsg "task must be Accepted" (status == Accepted)
+        create this with status = Completed, resultRef = Some completionRef
+
+    -- | Requester approves the completed work -> release funds to worker.
+    choice Approve : ContractId TaskEscrow
+      controller requester
+      do
+        assertMsg "task must be Completed" (status == Completed)
+        -- TODO(settlement): exercise the USDCx registry's Allocation_ExecuteTransfer
+        -- (CIP-0056 DvP) to release the locked allocation to the worker atomically.
+        create this with status = Paid
+
+    -- | Either side escalates to the arbiter.
+    choice Dispute : ContractId TaskEscrow
+      with raisedBy : Party
+      controller raisedBy
+      do
+        assertMsg "disputer must be requester or worker" (raisedBy == requester || raisedBy == worker)
+        assertMsg "disputable only after acceptance" (status == Accepted || status == Completed)
+        create this with status = Disputed
+
+    -- | Arbiter resolves a dispute: pay the worker or refund the requester.
+    choice Resolve : ContractId TaskEscrow
+      with payWorker : Bool
+      controller arbiter
+      do
+        assertMsg "must be Disputed" (status == Disputed)
+        -- TODO(settlement): on payWorker -> Allocation_ExecuteTransfer to worker;
+        -- otherwise -> Allocation_Withdraw / refund to requester.
+        create this with status = if payWorker then Paid else Refunded
+
+    -- | Requester reclaims funds for a task that was never accepted, or that expired.
+    choice Refund : ContractId TaskEscrow
+      controller requester
+      do
+        assertMsg "refundable only from Created or Expired" (status == Created || status == Expired)
+        -- TODO(settlement): Allocation_Withdraw the requester's locked allocation.
+        create this with status = Refunded
+
+    -- | Provider marks an overdue task Expired (after the deadline).
+    choice Expire : ContractId TaskEscrow
+      controller provider
+      do
+        now <- getTime
+        assertMsg "deadline not yet reached" (now >= deadline)
+        assertMsg "only Created or Accepted tasks expire" (status == Created || status == Accepted)
+        create this with status = Expired

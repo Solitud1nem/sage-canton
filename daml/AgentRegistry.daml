@@ -1,0 +1,57 @@
+-- | sage-canton agent registry.
+--
+-- A lightweight on-ledger profile for an AI agent: who it is (a Canton party),
+-- what it can do, where to reach it, and indicative pricing. The registry operator
+-- signs the profile; the agent observes it and controls updates to its own entry.
+--
+-- Privacy: a profile is visible only to (registryOperator, agent). Do NOT add a
+-- broad observer list (e.g. all agents) — that is the documented Canton over-sharing
+-- leak. Discovery happens off-ledger (the sage-canton backend), or via explicit
+-- disclosure, NOT via a public global query (Canton has no global state).
+--
+-- SKELETON. Contract-key lookup (name -> profile) is intentionally omitted until the
+-- exact `key … maintainer …` syntax is confirmed for the target SDK (see KB:
+-- platform-canton-network, "open items"). For now, look up profiles off-ledger.
+
+module AgentRegistry where
+
+template AgentProfile
+  with
+    registryOperator : Party        -- ^ sage-canton registry operator (signatory)
+    agent            : Party        -- ^ the agent's Canton party (observer + controller of updates)
+    name             : Text
+    capabilities     : [Text]       -- ^ e.g. ["summarize", "translate", "sentiment", "vision"]
+    endpoint         : Text         -- ^ off-ledger callable endpoint (https)
+    pricing          : Decimal      -- ^ indicative USDCx price per task
+    active           : Bool
+  where
+    signatory registryOperator
+    observer agent
+
+    -- | Agent updates its own capabilities / endpoint / pricing.
+    -- The existing contract carries registryOperator's authority (it is a signatory),
+    -- so re-creating with the same signatory is authorized when the agent exercises this.
+    choice UpdateProfile : ContractId AgentProfile
+      with
+        newCapabilities : [Text]
+        newEndpoint     : Text
+        newPricing      : Decimal
+      controller agent
+      do
+        assertMsg "profile is not active" active
+        create this with
+          capabilities = newCapabilities
+          endpoint = newEndpoint
+          pricing = newPricing
+
+    -- | Agent deactivates its profile (soft delete; keeps an auditable record).
+    choice Deactivate : ContractId AgentProfile
+      controller agent
+      do
+        create this with active = False
+
+    -- | Registry operator removes a profile entirely.
+    choice Remove : ()
+      controller registryOperator
+      do
+        pure ()

@@ -1,0 +1,14 @@
+# Daml project file for sage-canton.
+# IMPORTANT: pin sdk-version to the Daml SDK paired with your TARGET Canton network's
+# protocol version before deploying. As of 2026-06: MainNet damlSdk 3.4.12,
+# TestNet/DevNet damlSdk 3.5.1. Verify with the Version Compatibility dashboard.
+sdk-version: 3.5.1
+name: sage-canton
+source: daml
+version: 0.1.0
+dependencies:
+  - daml-prim
+  - daml-stdlib
+  - daml-script
+build-options:
+  - --target=2.1
