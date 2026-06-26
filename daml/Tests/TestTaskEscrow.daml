@@ -145,3 +145,28 @@ testCannotApproveBeforeComplete = do
   acceptedCid <- submit p.worker do exerciseCmd cid Accept
   submitMustFail p.requester do exerciseCmd acceptedCid Approve
   pure ()
+
+-- M2 live demo: run the happy path on a REAL running node and prove party-scoped
+-- privacy — a non-stakeholder party cannot see the escrow at all. Run against a live
+-- `dpm sandbox` (wall-clock time, upload the DAR first):
+--   dpm script --dar .daml/dist/sage-canton-0.1.0.dar \
+--     --script-name Tests.TestTaskEscrow:liveHappyPathWithPrivacy \
+--     --ledger-host localhost --ledger-port 6865 -w --upload-dar true
+liveHappyPathWithPrivacy : Script ()
+liveHappyPathWithPrivacy = do
+  p <- setupParties
+  outsider <- allocateParty "outsider"        -- a party with no stake in this escrow
+  cid <- createTask p
+  acceptedCid <- submit p.worker do exerciseCmd cid Accept
+  completedCid <- submit p.worker do
+    exerciseCmd acceptedCid Complete with completionRef = "live-result-001"
+  _paidCid <- submit p.requester do exerciseCmd completedCid Approve
+
+  -- A stakeholder (worker is an observer) sees the escrow; the outsider sees nothing.
+  workerView   <- query @TaskEscrow p.worker
+  outsiderView <- query @TaskEscrow outsider
+  debug ("privacy check — worker sees " <> show (length workerView)
+          <> " escrow(s), outsider sees " <> show (length outsiderView))
+  assertMsg "stakeholder (worker) must see the escrow"        (length workerView == 1)
+  assertMsg "non-stakeholder (outsider) must NOT see anything" (null outsiderView)
+  pure ()

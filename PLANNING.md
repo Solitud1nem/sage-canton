@@ -22,10 +22,19 @@ live product). Track 3: Payments / Neobanking / Agentic Commerce.
   before any DAR upload to keep the participant package store clean.
 - Toolchain/setup is recorded in `docs/setup/toolchain-and-references.md`.
 
-## M2 — Local end-to-end on LocalNet
-- Stand up cn-quickstart **LocalNet** (validators + Canton Coin + wallet).
-- Allocate provider/requester/worker/arbiter parties; run the happy path on a real node.
-- Verify privacy: confirm a non-stakeholder party cannot see an escrow.
+## M2 — Local end-to-end on a real node 🟡 (partial, 2026-06-26)
+- [x] Happy path on a **real running node**: `dpm sandbox` (gRPC 6865 / JSON API 6864),
+      DAR uploaded, `Tests.TestTaskEscrow:liveHappyPathWithPrivacy` → SUCCESS
+      (Created→Accepted→Completed→Paid).
+- [x] **Privacy verified on the live ledger**: a non-stakeholder `outsider` party sees
+      0 escrows while the worker (stakeholder) sees 1 — party-scoped visibility holds.
+- [ ] **Full cn-quickstart LocalNet** (multi-validator + Canton Coin + wallet) — BLOCKED
+      in this environment: no Docker (Docker Desktop WSL integration off), no Nix, no
+      direnv, and `sudo` is password-gated. Needed for the USDCx wallet flows in M3.
+      Unblock by enabling Docker Desktop WSL2 integration + installing Nix/direnv, then
+      follow `docs/setup/toolchain-and-references.md` §4.
+- Note: single-participant sandbox proves the ledger-model privacy guarantee but not
+  cross-participant sub-transaction privacy; that needs the multi-validator LocalNet.
 
 ## M3 — USDCx settlement (CIP-0056)
 - Pull exact `splice-api-token-*-v1` interface signatures; confirm USDCx registry
