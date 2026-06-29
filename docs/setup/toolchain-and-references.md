@@ -281,6 +281,32 @@ and pass its id via `PACKAGE_ID`. On a fresh participant the production package 
 (c) No external-party signing needed for this authority model — that's the self-custody layer
 (`/v2/interactive-submission/prepare`+`execute`, endpoints confirmed present), ADR-0018 §2.
 
+### External-party signing (self-custody) runbook (VERIFIED 2026-06-29)
+
+A party whose Ed25519 signing key lives OFF the participant. Implemented in
+`scripts/external_signing_demo.py`; design in ADR-0018 §2. Canton's own examples are bundled
+in the `canton` container at `/app/examples/08-interactive-submission/`. The moves (all over
+the JSON API):
+
+1. **Onboard** the external party: generate an Ed25519 keypair client-side →
+   `POST /v2/parties/external/generate-topology` with the DER public key
+   (`format=CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO`,
+   `keySpec=SIGNING_KEY_SPEC_EC_CURVE25519`) → returns `partyId`, `topologyTransactions`,
+   `multiHash` → sign the (base64-decoded) `multiHash` with the key →
+   `POST /v2/parties/external/allocate` with `multiHashSignatures` (`format=SIGNATURE_FORMAT_CONCAT`,
+   `signingAlgorithmSpec=SIGNING_ALGORITHM_SPEC_ED25519`). The party-id **namespace == the key
+   fingerprint** — the key controls the party.
+2. **Act** as the external party: `POST /v2/interactive-submission/prepare`
+   (`actAs=[extParty]`, `commands=[…]`) → returns `preparedTransaction` + `preparedTransactionHash`
+   → sign the (base64-decoded) hash with the key →
+   `POST /v2/interactive-submission/execute` with `partySignatures`.
+
+Gotchas: (a) `prepare` requires `packageIdSelectionPreference` (pass `[]`) even though the
+OpenAPI marks it optional. (b) `execute` requires the API user to hold **CanActAs** for the
+party — this is API-layer *relay* permission, NOT ledger authority; a wrong-key signature is
+rejected (400) regardless, so the participant cannot forge. (c) Errors surface as a masked
+`403 security-sensitive error`; the real reason is in the `canton` container DEBUG logs.
+
 ---
 
 ## 5. Canonical doc index (bookmark these)

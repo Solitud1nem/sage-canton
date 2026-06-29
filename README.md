@@ -116,6 +116,11 @@ A complete vertical slice, proven on a live Canton node:
   replicates only to its stakeholders' participants; outsiders on either see **0**, and the
   worker drives its choices from its own participant (no shared custody).
   `scripts/cross_participant_demo.py`; design in [ADR-0018](docs/adr/0018-cross-participant-privacy-and-external-signing.md).
+- **External-party signing (self-custody)** — the worker runs as an external party whose
+  Ed25519 key is generated client-side; it authorizes its `Accept` via interactive submission
+  (`prepare` → sign the tx hash → `execute`). A valid signature commits; a wrong-key signature
+  is rejected even though the participant could otherwise relay for it — the key, not the
+  operator, is the authority. `scripts/external_signing_demo.py`.
 - **TypeScript backend** — typed v2 JSON Ledger API + Amulet registry clients, REST API,
   idempotent automation (auto-expire / auto-settle).
 - **Demo UI** — fund → create → run agent → settle, with the worker's balance rising.

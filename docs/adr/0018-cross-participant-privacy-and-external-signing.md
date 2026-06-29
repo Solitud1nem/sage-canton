@@ -1,6 +1,6 @@
 # ADR-0018: Cross-participant privacy and external-party signing
 
-- **Status:** Accepted (cross-participant privacy demonstrated; external signing scoped)
+- **Status:** Accepted (cross-participant privacy AND external-party signing both demonstrated)
 - **Date:** 2026-06-29
 - **Deciders:** Alex
 - **Context note:** Continues the Canton-native ADR trail (0016 fork rationale, 0017
@@ -49,13 +49,23 @@ participant must host and what it may authorize.
    Prerequisite (learned the hard way): the package must be **vetted on BOTH participants**
    and they must share a synchronizer, otherwise submission fails `NO_SYNCHRONIZER_FOR_SUBMISSION`.
 
-2. **External signing (scoped, next).** Onboard the worker as an *external party* (key pair
-   generated client-side; the public key published to the participant's topology), then drive
-   its choices via `/v2/interactive-submission/prepare` → sign the returned transaction hash
-   with the private key → `/v2/interactive-submission/execute`. The endpoints are present on
-   the LocalNet JSON API (confirmed). The backend's current `CanActAs`-based `EscrowService`
-   becomes the "custodial" path; an external-signing path is added alongside for agents that
-   self-custody.
+2. **External signing (demonstrated).** Onboard the worker as an *external party* (Ed25519
+   key generated client-side; the public key published to the participant's topology via
+   `/v2/parties/external/generate-topology` → sign the multi-hash → `/v2/parties/external/allocate`),
+   then drive its choices via `/v2/interactive-submission/prepare` → sign the returned
+   transaction hash with the private key → `/v2/interactive-submission/execute`. Verified in
+   `scripts/external_signing_demo.py`:
+   - the external party's id **namespace equals its key fingerprint** — the key, not the
+     participant, controls the party;
+   - **positive:** the worker's `Accept` is authorized by an Ed25519 signature over the
+     prepared-transaction hash → committed (escrow `Accepted`);
+   - **negative:** the same flow with a *wrong-key* signature is **rejected** (execute 400,
+     escrow stays `Created`) even though the hosting participant holds `CanActAs` for the
+     worker. `CanActAs` is API-layer access control (the participant merely RELAYS the
+     submission); the cryptographic signature is the ledger authorization, so the participant
+     cannot forge an action without the worker's own key.
+   The backend's current `CanActAs`-based `EscrowService` is the "custodial" path; this
+   external-signing path is the self-custody alternative for agents.
 
 ## Alternatives considered
 
@@ -81,8 +91,11 @@ participant must host and what it may authorize.
   stakeholder, and the admin-party/topology plumbing grows; external signing adds client-side
   key management, external-party onboarding, and the two-step prepare/execute flow (more
   round-trips, hash-verification responsibility on the signer).
-- **Follow-ups:** (a) external-party onboarding + a `prepare`/sign/`execute` path in the
-  backend for the worker agent; (b) settle the cross-participant escrow in real Amulet (the
-  allocation's registry parties span participants — verify disclosure routing); (c) a fresh
-  LocalNet (or per-participant clean vetting) so the production `sage-canton` package, not the
-  `sage-canton-xc` stand-in, runs the cross-participant path.
+- **Follow-ups:** (a) fold the proven `prepare`/sign/`execute` flow into the backend as a
+  self-custody `EscrowService` path (client-side key store for the agent); (b) combine the two
+  layers — an *external* worker hosted on App Provider exercising its choices by signature
+  (each layer is proven independently; the combination is the full institutional story);
+  (c) settle the cross-participant escrow in real Amulet (the allocation's registry parties
+  span participants — verify disclosure routing); (d) a fresh LocalNet (or per-participant
+  clean vetting) so the production `sage-canton` package, not the `sage-canton-xc` stand-in,
+  runs these paths.
