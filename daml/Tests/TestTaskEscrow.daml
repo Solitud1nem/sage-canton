@@ -156,6 +156,38 @@ liveHappyPathWithPrivacy : Script ()
 liveHappyPathWithPrivacy = do
   p <- setupParties
   outsider <- allocateParty "outsider"        -- a party with no stake in this escrow
+  runLiveDemo p outsider
+
+-- | Same demo, but parties are supplied as INPUT instead of allocated by the script.
+-- This is the shape a real client (and the M4 backend) uses against an authenticated
+-- participant: parties are pre-allocated out-of-band and the submitting user holds
+-- `CanActAs` rights for them. Run against LocalNet (App Provider participant) with:
+--   dpm script --dar .daml/dist/sage-canton-0.1.0.dar \
+--     --script-name Tests.TestTaskEscrow:liveHappyPathFromInput \
+--     --ledger-host localhost --ledger-port 3901 \
+--     --access-token-file <jwt> --input-file <parties.json>
+-- where parties.json = {"provider":"…","requester":"…","worker":"…","arbiter":"…","outsider":"…"}
+data LiveParties = LiveParties
+  with
+    provider  : Party
+    requester : Party
+    worker    : Party
+    arbiter   : Party
+    outsider  : Party
+  deriving (Eq, Show)
+
+liveHappyPathFromInput : LiveParties -> Script ()
+liveHappyPathFromInput lp = do
+  let p = Parties with
+            provider  = lp.provider
+            requester = lp.requester
+            worker    = lp.worker
+            arbiter   = lp.arbiter
+  runLiveDemo p lp.outsider
+
+-- | Shared body: drive Created -> Paid, then assert party-scoped privacy.
+runLiveDemo : Parties -> Party -> Script ()
+runLiveDemo p outsider = do
   cid <- createTask p
   acceptedCid <- submit p.worker do exerciseCmd cid Accept
   completedCid <- submit p.worker do

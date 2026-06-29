@@ -22,27 +22,49 @@ live product). Track 3: Payments / Neobanking / Agentic Commerce.
   before any DAR upload to keep the participant package store clean.
 - Toolchain/setup is recorded in `docs/setup/toolchain-and-references.md`.
 
-## M2 — Local end-to-end on a real node 🟡 (partial, 2026-06-26)
+## M2 — Local end-to-end on a real node ✅ (2026-06-29)
 - [x] Happy path on a **real running node**: `dpm sandbox` (gRPC 6865 / JSON API 6864),
       DAR uploaded, `Tests.TestTaskEscrow:liveHappyPathWithPrivacy` → SUCCESS
       (Created→Accepted→Completed→Paid).
 - [x] **Privacy verified on the live ledger**: a non-stakeholder `outsider` party sees
       0 escrows while the worker (stakeholder) sees 1 — party-scoped visibility holds.
-- [ ] **Full cn-quickstart LocalNet** (multi-validator + Canton Coin + wallet) — BLOCKED
-      in this environment: no Docker (Docker Desktop WSL integration off), no Nix, no
-      direnv, and `sudo` is password-gated. Needed for the USDCx wallet flows in M3.
-      Unblock by enabling Docker Desktop WSL2 integration + installing Nix/direnv, then
-      follow `docs/setup/toolchain-and-references.md` §4.
-- Note: single-participant sandbox proves the ledger-model privacy guarantee but not
-  cross-participant sub-transaction privacy; that needs the multi-validator LocalNet.
+- [x] **Full cn-quickstart LocalNet up** (multi-validator + Canton Coin + wallet):
+      `make setup`/`build`/`start` green; ~15 containers healthy (canton, splice SV,
+      wallets, scan, swagger). Setup recipe + ports in
+      `docs/setup/toolchain-and-references.md` §4.
+- [x] **Our DAR runs on LocalNet**: `sage-canton-0.1.1.dar` (built SDK 3.5.1) uploaded to
+      the **3.4.11** App Provider participant and exercised end-to-end via
+      `Tests.TestTaskEscrow:liveHappyPathFromInput` (gRPC 3901, JWT auth + granted
+      `CanActAs` rights) → Created→Accepted→Completed→Paid, **privacy holds** (worker
+      sees 1, outsider 0). Resolves the 3.5.1↔3.4.11 version-compat question (compatible).
+- Scope note: all 5 parties are on ONE participant → this proves the lifecycle + the full
+  auth model (tokens + party rights, the M4 backend pattern) + party-scoped privacy on the
+  real node. **Cross-participant** sub-transaction privacy (requester on app-user 2901,
+  worker on app-provider 3901) is the next step and needs external-party signing → M4.
 
-## M3 — USDCx settlement (CIP-0056)
-- Pull exact `splice-api-token-*-v1` interface signatures; confirm USDCx registry
-  admin party + URL + fee model.
-- Wire `Approve`/`Resolve`/`Refund`/`Expire` to Allocation/DvP
-  (`AllocationFactory_Allocate` at funding, `Allocation_ExecuteTransfer` / `_Withdraw` /
-  `_Cancel`).
-- Demonstrate an atomic task-output-for-payment settlement.
+## M3 — CIP-0056 settlement (Amulet for dev, USDCx for prod)
+Design decided in **ADR-0017** (2026-06-29): settle via the CIP-0056 Allocation/DvP
+primitive, coding against the `splice-api-token-*-v1` **interfaces only** (never a concrete
+token DAR). Instrument is config: **Amulet (Canton Coin)** on LocalNet, **USDCx** on
+TestNet/MainNet via a one-line config switch.
+- Research done (2026-06-29): USDCx is **not** on LocalNet/DevNet → dev on Amulet
+  (`instrumentId = "Amulet"`). USDCx admin-party + registry URLs (MainNet/TestNet) + fee
+  model (read from factory response, not fixed) captured in
+  `docs/setup/toolchain-and-references.md` §3.
+- [ ] Add `InstrumentId` field + allocation-cid ref to `TaskEscrow`; wire
+  `Approve`/`Resolve`/`Refund`/`Expire` to Allocation/DvP (`AllocationFactory_Allocate` at
+  funding, `Allocation_ExecuteTransfer` / `_Withdraw` / `_Cancel`).
+- [ ] Pull exact `splice-api-token-allocation-instruction-v1` factory choice signatures.
+- [ ] Unit-test with `splice-token-standard-test` mock registry; integration-test on
+  LocalNet with real Amulet.
+- [ ] Demonstrate an atomic task-output-for-payment settlement.
+- ⚠️ Version-alignment risk: our project is pinned to SDK **3.5.1**; cn-quickstart LocalNet
+  runs **3.4.11** with splice token DARs at **1.0.0**. Verify our DAR uploads to the 3.4.x
+  participant and that `data-dependencies` on the 1.0.0 DARs compile from a 3.5.1 project;
+  if not, align our `daml.yaml` to the LocalNet runtime for the settlement package.
+- Reference impl to copy: `cn-quickstart/quickstart/daml/licensing/.../License.daml`
+  (`Allocation_ExecuteTransfer` pay-leg + `AllocationRequest` interface) — see
+  `docs/setup/toolchain-and-references.md` §3.
 
 ## M4 — Backend + JSON Ledger API
 - TS backend (`dpm codegen-js` bindings) over the JSON Ledger API; PQS for reads.

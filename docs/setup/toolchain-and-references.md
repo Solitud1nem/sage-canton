@@ -113,30 +113,111 @@ We do **not** implement token transfers; we drive the standard's **Allocation / 
 - **Refund (`Refund` / `Resolve→!payWorker` / `Expired`):** **`Allocation_Withdraw`**
   (requester reclaims) or **`Allocation_Cancel`** (joint sender/receiver/executor).
 
-> Still to pull exactly before wiring: the factory `*_Allocate` choice name + argument
-> shape, USDCx registry admin party + registry URL + fee model. Tracked in `PLANNING.md`
-> M3 and `CLAUDE.md` open items.
+> **Fee model (verified 2026-06-29):** NOT a fixed protocol fee. The factory choice
+> response **metadata** returns the fee + any sender-change at runtime — read it, do not
+> hardcode. Separately, Canton traffic fees are paid in Canton Coin (app provider can pay
+> for a rebate). Still to pull before wiring: exact factory `*_Allocate` choice name +
+> argument shape from `splice-api-token-allocation-instruction-v1`.
 
-### USDC on Canton (USDCx)
+### Reference implementation to copy from (verified 2026-06-29)
 
-- USDC = a CIP-0056 standard token via DA Utilities (xReserve): mint/burn docs at
-  https://docs.digitalasset.com/usdc/xreserve/overview.html
+cn-quickstart ships a **worked allocation app** — copy its shape for `TaskEscrow` M3:
+`cn-quickstart/quickstart/daml/licensing/daml/Licensing/License.daml`.
+
+- Imports: `Splice.Api.Token.{MetadataV1, HoldingV1, AllocationV1, AllocationRequestV1}`.
+- Carries the instrument as a field: `licenseFeeInstrumentId : InstrumentId`.
+- Implements `interface instance AllocationRequest` → declares `SettlementInfo`
+  (`executor = provider`, `allocateBefore`/`settleBefore` deadlines, `settlementRef`) and
+  a `transferLegs` map of `TransferLeg { sender; receiver; amount; instrumentId }`.
+- Settlement choice `LicenseRenewalRequest_CompleteRenewal`:
+  `allocationCid : ContractId Allocation`, `extraArgs : ExtraArgs` → `fetch @Allocation`,
+  assert `transferLegId`/`transferLeg`/`settlement` match the request, then
+  `exercise allocationCid (Allocation_ExecuteTransfer extraArgs)`. ← our `Approve` pay-leg.
+- **Exact CIP-0056 interface DARs** are vendored at `quickstart/daml/dars/` after
+  `make build`: `splice-api-token-{metadata,holding,allocation,allocation-request,
+  allocation-instruction,transfer-instruction}-v1-1.0.0.dar`; mock registry for tests at
+  `splice-token-standard-test-1.0.6.dar`; Canton Coin impl at `splice-amulet-0.1.14.dar`.
+  Add these as `data-dependencies` in our `daml.yaml` to wire M3.
+
+### USDC on Canton (USDCx) — verified deployment facts (2026-06-29)
+
+USDCx = a CIP-0056 token issued via DA Utilities (xReserve, impl package `utility-bridge-v0`).
+**Not available on LocalNet/DevNet** — dev settles on **Amulet (Canton Coin)**; USDCx is a
+config switch on TestNet/MainNet (see ADR-0017). The admin-party → registry-URL mapping has
+**no on-ledger resolver yet** — the app must maintain it in config.
+
+| | Instrument admin party (`InstrumentId.admin`) | Registry base URL |
+| --- | --- | --- |
+| **MainNet** (live since 2025-12-04) | `decentralized-usdc-interchain-rep::12208115f1e168dd7e792320be9c4ca720c751a02a3053c7606e1c1cd3dad9bf60ef` | `https://api.utilities.digitalasset.com` |
+| **TestNet** | `decentralized-usdc-interchain-rep::122049e2af8a725bd19759320fc83c638e7718973eac189d8f201309c512d1ffec61` | `https://api.utilities.digitalasset-staging.com` |
+| **DevNet / LocalNet** | not published — use **Amulet** (`InstrumentId.id = "Amulet"`, local registry) | `LOCALNET_REGISTRY_API_URL` |
+
+- Token-metadata endpoint pattern: `<base>/api/token-standard/v0/registrars/<adminParty>/registry/metadata/v1/instruments`.
+- Verify the live **instrument**-admin party against that endpoint before hardcoding — the
+  bridge-agreement party and the instrument-admin party may differ.
+- xReserve / USDCx docs: https://docs.digitalasset.com/integrate/devnet/usdcx-support/index.html
+- Mock registry for Daml-Script tests: `splice-token-standard-test`
+  (https://github.com/hyperledger-labs/splice/tree/main/token-standard).
 
 ---
 
-## 4. Local end-to-end — CN Quickstart (LocalNet)
+## 4. Local end-to-end — CN Quickstart (LocalNet) — VERIFIED run (2026-06-29)
 
-For M2 (real multi-party node + Canton Coin + wallet). Heavier than `dpm sandbox`.
+Real multi-participant node + Canton Coin + wallet. Heavier than `dpm sandbox`. We brought
+this up and ran `TaskEscrow` on it end-to-end; the exact steps that worked:
+
+**Prerequisites:** Docker (Desktop WSL2 integration on, ~8 GB RAM), Nix ≥ 2.25 with flakes
+enabled (`echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf`),
+direnv. JDK/Daml SDK come from the repo's nix devshell — you do NOT need them on the host.
+
+**Bring-up:**
+```bash
+git clone https://github.com/digital-asset/cn-quickstart.git && cd cn-quickstart
+# skip the interactive `make setup` by pre-writing quickstart/.env.local:
+#   OBSERVABILITY_ENABLED=false / AUTH_MODE=shared-secret / PARTY_HINT=quickstart-sage-1 / TEST_MODE=off
+nix develop --command bash -c 'cd quickstart && make build && make start'
+```
+First run pulls ~8-10 GB of Canton/Splice images and the SV bootstrap (splice container
+`health: starting`) takes several minutes — normal. `make start` exits 0 when ~15
+containers are healthy. `make stop` / `make start` reuse the cached images (fast).
+
+**Participant ports (host = container, directly published):**
+
+| Participant | gRPC ledger | admin | JSON Ledger API |
+| --- | --- | --- | --- |
+| App User | 2901 | 2902 | 2975 |
+| App Provider | 3901 | 3902 | 3975 |
+| SV | 4901 | 4902 | 4975 |
+
+**Auth (shared-secret mode):** the ledger API needs an HS256 JWT signed with secret
+`unsafe`, claims `{"sub":"ledger-api-user","aud":"https://canton.network.global"}`. Mint it
+with `jwt-cli encode hs256 --s unsafe --p '{...}'` (in any splice container) or with openssl.
+No token → 401; valid token → 200.
+
+**Run our DAR on it (what worked):**
+```bash
+# 1. upload the DAR via JSON Ledger API (admin)
+curl -H "Authorization: Bearer $JWT" -H "Content-Type: application/octet-stream" \
+     --data-binary @.daml/dist/sage-canton-0.1.1.dar  http://localhost:3975/v2/packages
+# 2. allocate parties:   POST http://localhost:3975/v2/parties {"partyIdHint":"worker",...}
+# 3. grant the submitting user actAs rights (else PERMISSION_DENIED on submit):
+#    POST /v2/users/ledger-api-user/rights  {rights:[{kind:{CanActAs:{value:{party:"…"}}}},…]}
+# 4. run a script that takes parties as INPUT (not allocateParty):
+dpm script --dar .daml/dist/sage-canton-0.1.1.dar \
+  --script-name Tests.TestTaskEscrow:liveHappyPathFromInput \
+  --ledger-host localhost --ledger-port 3901 \
+  --access-token-file jwt.txt --input-file parties.json
+```
+Gotchas we hit: (a) **version+name collision** — re-uploading a changed DAR with the same
+`name:version` fails `KNOWN_PACKAGE_VERSION`; bump `version` in `daml.yaml`. (b) a SDK-3.5.1
+DAR uploads + runs fine on the 3.4.11 LocalNet participant. (c) the submitting user must
+hold `CanActAs` for every party it acts as — `allocateParty`-inside-the-script does NOT
+grant that, hence the input-driven script + explicit rights grant (this is also the M4
+backend pattern).
 
 - Repo: https://github.com/digital-asset/cn-quickstart.git
 - Install doc: https://docs.digitalasset.com/build/3.4/quickstart/download/cnqs-installation.html
-- Prerequisites: **Docker Desktop** (~8 GB RAM), **Nix** ≥ 2.25.2, **direnv**, **curl**;
-  Windows → **WSL 2** (admin). JDK/Daml SDK come inside the Docker env.
-- Fast path: `docker login` → `cd quickstart` → `make setup` (Observability off, OAuth2 on,
-  default party hint, TEST MODE off) → `make build` → `make capture-logs` (separate term) →
-  `make start`.
-- LocalNet = local validator + local super-validator (synchronizer); used for Canton Coin +
-  wallet + USDCx flows.
+- Reference app using the token standard: `quickstart/daml/licensing/` (see §3).
 
 ---
 
