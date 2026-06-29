@@ -1,6 +1,6 @@
 // Core escrow orchestration: TaskEscrow lifecycle + CIP-0056 settlement over the ledger.
 import { ALLOCATION_INSTRUCTION_PKG } from './config.js';
-import { LedgerClient, createdBySuffix, type Command } from './ledger.js';
+import { LedgerClient, createdBySuffix, type Command, type CreatedEvent } from './ledger.js';
 import { RegistryClient } from './registry.js';
 import type { ContractId, EscrowContract, InstrumentId, Party, TaskEscrow } from './types.js';
 import { emptyMeta } from './types.js';
@@ -85,9 +85,35 @@ export class EscrowService {
    * the Paid escrow. Mirrors scripts/live_settlement_demo.py.
    */
   async settle(escrow: EscrowContract): Promise<EscrowContract> {
-    const t = escrow.payload;
-    const dso = t.instrumentId.admin;
-    const inst = t.instrumentId;
+    const allocEv = await this.fundAllocation(escrow.payload);
+    return this.settleAllocation(escrow.contractId, 'SettlePayment', allocEv, 'execute-transfer', [escrow.payload.worker]);
+  }
+
+  /**
+   * Value-moving dispute resolution — the arbiter rules for the REQUESTER and the locked
+   * funds actually return (SettleResolveRefund -> Allocation_Withdraw). The escrow must
+   * already be Disputed. Worker is paid nothing; escrow -> Refunded. The arbiter isn't an
+   * allocation stakeholder, so we disclose the funded allocation to it (via the backend's
+   * blob) at withdraw time.
+   */
+  async settleResolveRefund(escrow: EscrowContract): Promise<EscrowContract> {
+    const allocEv = await this.fundAllocation(escrow.payload);
+    return this.settleAllocation(escrow.contractId, 'SettleResolveRefund', allocEv, 'withdraw', [escrow.payload.arbiter]);
+  }
+
+  /**
+   * Value-moving dispute resolution — the arbiter rules for the WORKER, who is paid for real
+   * (SettleResolvePayWorker -> Allocation_ExecuteTransfer). The escrow must already be
+   * Disputed. Jointly authorized by [arbiter, worker]: the arbiter rules, the worker claims.
+   */
+  async settleResolvePayWorker(escrow: EscrowContract): Promise<EscrowContract> {
+    const allocEv = await this.fundAllocation(escrow.payload);
+    return this.settleAllocation(escrow.contractId, 'SettleResolvePayWorker', allocEv, 'execute-transfer', [escrow.payload.arbiter, escrow.payload.worker]);
+  }
+
+  /** Fund the escrow's payment leg: the requester locks `amount` of the instrument into a
+   *  CIP-0056 Allocation via the registry factory. Returns the created allocation event. */
+  private async fundAllocation(t: TaskEscrow): Promise<CreatedEvent> {
     const settleBefore = plusSeconds(t.deadline, 86_400);
     const settlement = {
       executor: t.provider,
@@ -95,12 +121,10 @@ export class EscrowService {
       requestedAt: t.createdAt, allocateBefore: t.deadline, settleBefore,
       meta: emptyMeta(),
     };
-    const leg = { sender: t.requester, receiver: t.worker, amount: t.amount, instrumentId: inst, meta: emptyMeta() };
-
-    // 1. fund the allocation (requester locks Amulet via the registry factory)
+    const leg = { sender: t.requester, receiver: t.worker, amount: t.amount, instrumentId: t.instrumentId, meta: emptyMeta() };
     const inputs = (await this.ledger.amuletHoldings(t.requester)).map((h) => h.contractId);
     const args: Record<string, unknown> = {
-      expectedAdmin: dso,
+      expectedAdmin: t.instrumentId.admin,
       allocation: { settlement, transferLegId: 'taskPayment', transferLeg: leg },
       requestedAt: t.createdAt, inputHoldingCids: inputs,
       extraArgs: { context: { values: {} }, meta: emptyMeta() },
@@ -113,15 +137,22 @@ export class EscrowService {
     );
     const allocEv = createdBySuffix(allocTx, ALLOCATION_SUFFIX);
     if (!allocEv) throw new Error('allocation not created');
+    return allocEv;
+  }
 
-    // 2. worker settles (execute the transfer atomically with the status flip to Paid)
-    const tc = await this.registry.allocationChoiceContext(allocEv.contractId, 'execute-transfer');
+  /** Exercise a value-moving TaskEscrow choice against a funded allocation: fetch the
+   *  registry choice-context, disclose the allocation alongside it, and submit as `actAs`. */
+  private async settleAllocation(
+    escrowCid: ContractId, choice: string, allocEv: CreatedEvent,
+    kind: 'execute-transfer' | 'withdraw', actAs: Party[],
+  ): Promise<EscrowContract> {
+    const tc = await this.registry.allocationChoiceContext(allocEv.contractId, kind);
     const disclosed = [...tc.disclosed, { templateId: allocEv.templateId, contractId: allocEv.contractId, createdEventBlob: allocEv.createdEventBlob!, synchronizerId: tc.disclosed[0]!.synchronizerId }];
-    const settleTx = await this.ledger.submit(
-      [this.exercise(escrow.contractId, 'SettlePayment', { allocationCid: allocEv.contractId, extraArgs: { context: tc.context, meta: emptyMeta() } })],
-      [t.worker], disclosed,
+    const tx = await this.ledger.submit(
+      [this.exercise(escrowCid, choice, { allocationCid: allocEv.contractId, extraArgs: { context: tc.context, meta: emptyMeta() } })],
+      actAs, disclosed,
     );
-    return this.created(createdBySuffix(settleTx, TE_SUFFIX)!);
+    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
   }
 
   private created(ce: { contractId: ContractId; createArgument?: Record<string, unknown> }): EscrowContract {

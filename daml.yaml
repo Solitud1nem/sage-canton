@@ -16,7 +16,7 @@
 sdk-version: 3.4.11
 name: sage-canton
 source: daml
-version: 0.1.2
+version: 0.1.3
 dependencies:
   - daml-prim
   - daml-stdlib

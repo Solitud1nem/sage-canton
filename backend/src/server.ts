@@ -51,6 +51,19 @@ route('POST', '/tasks/:cid/settle', async (p, b) => {
   if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
   return svc.settle(esc);
 });
+// Value-moving dispute resolution (escrow must already be Disputed): the arbiter returns
+// the locked funds to the requester for real (worker paid nothing).
+route('POST', '/tasks/:cid/settle-resolve-refund', async (p, b) => {
+  const esc = await svc.get(b.provider, p.cid!);
+  if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
+  return svc.settleResolveRefund(esc);
+});
+// Value-moving dispute resolution: the arbiter rules for the worker, who is paid for real.
+route('POST', '/tasks/:cid/settle-resolve-pay', async (p, b) => {
+  const esc = await svc.get(b.provider, p.cid!);
+  if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
+  return svc.settleResolvePayWorker(esc);
+});
 route('POST', '/admin/tap', async (_p, b) => { await tap(String(b.amount ?? '1000.0')); return { tapped: b.amount ?? '1000.0', party: await walletParty() }; });
 // Flagship: run the AI research agent + paid fact-checker on a Created task -> conditional
 // settlement (citations resolve = worker paid; fabricated = disputed, no payout).

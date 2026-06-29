@@ -48,11 +48,15 @@ Created/Accepted ──▶ Expired ──Refund──▶ Refunded
 Settlement is **wired and working** via the CIP-0056 Allocation (DvP) primitive: `TaskEscrow`
 implements the `AllocationRequest` interface, and `SettlePayment` exercises
 `Allocation_ExecuteTransfer` so funds move atomically with the status flip to Paid;
-`SettleRefund` withdraws on reclaim. We code against the `splice-api-token-*-v1` **interfaces
-only**, so the instrument is configuration — **Amulet (Canton Coin)** on LocalNet, **USDCx**
-on Test/MainNet (a one-line switch; see [ADR-0017](docs/adr/0017-settlement-via-cip0056-token-standard.md)).
-Proven both in Daml Script (mock registry) and **end-to-end on a live cn-quickstart node**
-(the worker's real Canton Coin balance increases on settlement).
+`SettleRefund` withdraws on reclaim. Disputes settle for real too: `SettleResolveRefund`
+returns the locked funds to the requester (arbiter-controlled withdraw), and
+`SettleResolvePayWorker` pays the worker (jointly authorized by arbiter + worker, since the
+transfer needs the receiver's authority). We code against the `splice-api-token-*-v1`
+**interfaces only**, so the instrument is configuration — **Amulet (Canton Coin)** on
+LocalNet, **USDCx** on Test/MainNet (a one-line switch; see
+[ADR-0017](docs/adr/0017-settlement-via-cip0056-token-standard.md)). Proven both in Daml
+Script (mock registry) and **end-to-end on a live cn-quickstart node** (the worker's real
+Canton Coin balance increases on settlement; a disputed task returns the locked funds).
 
 ## Repo layout
 
@@ -98,7 +102,7 @@ verified LocalNet bring-up + the live-settlement runbook.
 
 A complete vertical slice, proven on a live Canton node:
 
-- **Daml model** — `TaskEscrow` lifecycle + CIP-0056 settlement; 12 Daml-Script tests green.
+- **Daml model** — `TaskEscrow` lifecycle + CIP-0056 settlement; 14 Daml-Script tests green.
 - **Real settlement** — worker paid in actual Canton Coin via the Allocation/DvP flow,
   on a live cn-quickstart node (USDCx is a config switch — [ADR-0017](docs/adr/0017-settlement-via-cip0056-token-standard.md)).
 - **Privacy, demonstrated** — a non-stakeholder party sees **0** escrows on the live ledger

@@ -12,6 +12,7 @@ module Tests.TestSettlement where
 import Daml.Script hiding (Created)
 import DA.Assert ((===))
 import DA.List (head, sortOn)
+import DA.Map qualified as Map
 import DA.Time (addRelTime, seconds)
 
 import Splice.Api.Token.MetadataV1 (ExtraArgs(..), emptyMetadata)
@@ -147,4 +148,121 @@ testSettlementRefunds = do
   task.status === Refunded
   -- funds are back with the requester (minus negligible fees)
   WalletClient.checkBalanceApprox requester inst 1000.0
+  pure ()
+
+-- Dispute -> refund (value-moving): a funded task is accepted, completed, then disputed;
+-- the arbiter rules for the requester and ACTUALLY returns the locked Amulet via
+-- `SettleResolveRefund` (Allocation_Withdraw). Worker is paid nothing; escrow -> Refunded.
+testDisputeSettlementRefunds : Script ()
+testDisputeSettlementRefunds = do
+  registry <- AmuletRegistry.initialize AmuletRegistry.defaultAmuletRegistryConfig
+  provider  <- allocateParty "provider"
+  requester <- allocateParty "requester"
+  worker    <- allocateParty "worker"
+  arbiter   <- allocateParty "arbiter"
+
+  _ <- AmuletRegistry.tapFaucet registry requester 1000.0
+  now <- getTime
+  let inst   = registry.instrumentId
+      reward = 100.0
+      refId  = "settle-dispute-refund-001"
+
+  -- create -> accept -> complete (worker did the work, but it's contested)
+  escrowCid <- submit (actAs [provider, requester]) do
+    createCmd TaskEscrow with
+      provider; requester; worker; arbiter
+      taskRef = refId; amount = reward; instrumentId = inst
+      status = Created; createdAt = now
+      deadline = now `addRelTime` seconds 3600; resultRef = None
+  acceptedCid  <- submit worker do exerciseCmd escrowCid Accept
+  completedCid <- submit worker do exerciseCmd acceptedCid Complete with completionRef = "artifact-1"
+
+  -- requester funds the allocation (locks Amulet) at any point before settlement
+  [reqAlloc] <- WalletClient.listRequestedAllocations requester inst
+  holdingCids <- WalletClient.listHoldingCids requester inst
+  enriched <- RegistryApi.getAllocationFactory registry AllocationFactory_Allocate with
+    expectedAdmin    = registry.dso
+    allocation       = reqAlloc
+    requestedAt      = now
+    inputHoldingCids = holdingCids
+    extraArgs        = emptyExtraArgs
+  submitWithDisclosures' requester enriched.disclosures $
+    exerciseCmd enriched.factoryCid enriched.arg
+
+  -- requester contests the result -> Disputed
+  disputedCid <- submit requester do exerciseCmd completedCid Dispute with raisedBy = requester
+
+  -- arbiter rules for the requester and returns the locked funds for real. The arbiter is
+  -- not a stakeholder on the Amulet allocation, so the provider (who sees it) discloses it.
+  (allocCid, _) <- allocationForTask provider refId
+  ctx <- RegistryApi.getAllocation_WithdrawContext registry allocCid emptyMetadata
+  allocDisc <- queryDisclosure' provider (coerceContractId allocCid : ContractId AmuletAllocation)
+  refundedCid <- submitWithDisclosures' arbiter (ctx.disclosures <> allocDisc) $
+    exerciseCmd disputedCid SettleResolveRefund with
+      allocationCid = allocCid
+      extraArgs = ExtraArgs with context = ctx.choiceContext, meta = emptyMetadata
+
+  Some task <- queryContractId provider refundedCid
+  task.status === Refunded
+  -- requester whole again; worker received nothing
+  WalletClient.checkBalanceApprox requester inst 1000.0
+  WalletClient.checkBalanceApprox worker inst 0.0
+  pure ()
+
+-- Dispute -> pay worker (value-moving): a funded, completed task is disputed; the arbiter
+-- rules for the worker and the worker claims via `SettleResolvePayWorker`
+-- (Allocation_ExecuteTransfer, jointly controlled by arbiter + worker). Worker is paid;
+-- escrow -> Paid.
+testDisputeSettlementPaysWorker : Script ()
+testDisputeSettlementPaysWorker = do
+  registry <- AmuletRegistry.initialize AmuletRegistry.defaultAmuletRegistryConfig
+  provider  <- allocateParty "provider"
+  requester <- allocateParty "requester"
+  worker    <- allocateParty "worker"
+  arbiter   <- allocateParty "arbiter"
+
+  AmuletRegistry.featureApp registry provider
+  _ <- AmuletRegistry.tapFaucet registry requester 1000.0
+  now <- getTime
+  let inst   = registry.instrumentId
+      reward = 100.0
+      refId  = "settle-dispute-pay-001"
+
+  escrowCid <- submit (actAs [provider, requester]) do
+    createCmd TaskEscrow with
+      provider; requester; worker; arbiter
+      taskRef = refId; amount = reward; instrumentId = inst
+      status = Created; createdAt = now
+      deadline = now `addRelTime` seconds 3600; resultRef = None
+  acceptedCid  <- submit worker do exerciseCmd escrowCid Accept
+  completedCid <- submit worker do exerciseCmd acceptedCid Complete with completionRef = "artifact-1"
+
+  [reqAlloc] <- WalletClient.listRequestedAllocations requester inst
+  holdingCids <- WalletClient.listHoldingCids requester inst
+  enriched <- RegistryApi.getAllocationFactory registry AllocationFactory_Allocate with
+    expectedAdmin    = registry.dso
+    allocation       = reqAlloc
+    requestedAt      = now
+    inputHoldingCids = holdingCids
+    extraArgs        = emptyExtraArgs
+  submitWithDisclosures' requester enriched.disclosures $
+    exerciseCmd enriched.factoryCid enriched.arg
+
+  -- worker contests the (lack of) approval -> Disputed
+  disputedCid <- submit worker do exerciseCmd completedCid Dispute with raisedBy = worker
+
+  -- arbiter rules for the worker; the worker claims (joint arbiter+worker authority)
+  (allocCid, _) <- allocationForTask provider refId
+  ctx <- RegistryApi.getAllocation_TransferContext registry allocCid emptyMetadata
+  allocDisc <- queryDisclosure' provider (coerceContractId allocCid : ContractId AmuletAllocation)
+  -- joint arbiter+worker authority: build a multi-party submission with the same disclosures
+  let discs = Map.values (ctx.disclosures <> allocDisc).disclosures
+  paidCid <- submit (actAs [arbiter, worker] <> discloseMany discs) $
+    exerciseCmd disputedCid SettleResolvePayWorker with
+      allocationCid = allocCid
+      extraArgs = ExtraArgs with context = ctx.choiceContext, meta = emptyMetadata
+
+  Some task <- queryContractId provider paidCid
+  task.status === Paid
+  WalletClient.checkBalanceApprox worker inst reward
   pure ()

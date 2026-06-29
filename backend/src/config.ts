@@ -27,8 +27,8 @@ export const config: Config = {
   authAudience: env('AUTH_AUDIENCE', 'https://canton.network.global'),
   adminUser: env('ADMIN_USER', 'ledger-api-user'),
   walletUser: env('WALLET_USER', 'app-user'),
-  // sage-canton 0.1.2 main package (rebuild + update if the contract changes; or set via env)
-  packageId: env('PACKAGE_ID', '8ca20596e9704ccff991ae8a4f5d4aacf333c7b28dbe79f08ba8d870fed140d6'),
+  // sage-canton 0.1.3 main package (rebuild + update if the contract changes; or set via env)
+  packageId: env('PACKAGE_ID', '2bf7c0be5e88b32e28445482329772e60a32a1e46dd741b9c152914023d38ca9'),
   port: Number(env('PORT', '8088')),
 };
 

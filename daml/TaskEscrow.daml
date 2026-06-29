@@ -155,6 +155,41 @@ template TaskEscrow
         _ <- exercise allocationCid (Allocation_Withdraw with extraArgs)
         create this with status = Refunded
 
+    -- | Value-moving sibling of `Resolve(payWorker=False)`: the arbiter rules a dispute in
+    -- the requester's favour and ACTUALLY returns the locked funds. The withdraw needs the
+    -- allocation sender's (requester's) authority, which the arbiter obtains here because
+    -- the requester is an escrow signatory — so a single arbiter submit suffices, and the
+    -- arbiter (not the requester unilaterally) gates the release during arbitration.
+    choice SettleResolveRefund : ContractId TaskEscrow
+      with
+        allocationCid : ContractId Allocation
+        extraArgs     : ExtraArgs
+      controller arbiter
+      do
+        assertMsg "must be Disputed" (status == Disputed)
+        _ <- exercise allocationCid (Allocation_Withdraw with extraArgs)
+        create this with status = Refunded
+
+    -- | Value-moving sibling of `Resolve(payWorker=True)`: the arbiter rules a dispute in
+    -- the worker's favour and ACTUALLY pays them. `Allocation_ExecuteTransfer` needs the
+    -- receiver's (worker's) authority in addition to executor+sender, so this choice is
+    -- jointly controlled by [arbiter, worker]: the arbiter rules, the worker claims. The
+    -- funded allocation must match exactly what this escrow requested.
+    choice SettleResolvePayWorker : ContractId TaskEscrow
+      with
+        allocationCid : ContractId Allocation
+        extraArgs     : ExtraArgs
+      controller arbiter, worker
+      do
+        assertMsg "must be Disputed" (status == Disputed)
+        allocView <- fmap (view @Allocation) (fetch allocationCid)
+        let reqView      = view (toInterface @AllocationRequest this)
+            expectedLeg  = fromSome (TextMap.lookup taskPaymentLegId reqView.transferLegs)
+        expectedLeg          === allocView.allocation.transferLeg
+        reqView.settlement   === allocView.allocation.settlement
+        _ <- exercise allocationCid (Allocation_ExecuteTransfer with extraArgs)
+        create this with status = Paid
+
     -- | CIP-0056 AllocationRequest: the requester's wallet reads this to fund the task by
     -- creating an `Allocation` (locking `amount` of `instrumentId`) for the worker.
     interface instance AllocationRequest for TaskEscrow where

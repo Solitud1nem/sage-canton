@@ -16,8 +16,10 @@ PREREQUISITES (one-time, see docs/setup/toolchain-and-references.md §4):
     the app-user participant, and grants the ledger-api-user `CanActAs` rights.
 
 USAGE:
-  python3 scripts/live_settlement_demo.py setup   # upload DAR + allocate parties + grant
-  python3 scripts/live_settlement_demo.py run      # tap -> create -> ... -> settle
+  python3 scripts/live_settlement_demo.py setup           # upload DAR + allocate parties + grant
+  python3 scripts/live_settlement_demo.py run             # happy path: ... -> SettlePayment (worker paid)
+  python3 scripts/live_settlement_demo.py dispute-refund  # fund -> dispute -> SettleResolveRefund (locked funds returned)
+  python3 scripts/live_settlement_demo.py dispute-pay     # fund -> dispute -> SettleResolvePayWorker (worker paid)
 
 Endpoints / auth (shared-secret LocalNet): HS256 JWT, secret 'unsafe',
 aud 'https://canton.network.global'. App-user participant JSON API :2975, validator :2903,
@@ -124,36 +126,27 @@ def setup():
     json.dump(parties, open(PARTYFILE,"w"), indent=2)
     print("parties:", json.dumps(parties, indent=2)); print("saved ->", PARTYFILE)
 
-# -------------------------------------------------------------------- run
-def run():
-    if not os.path.exists(PARTYFILE): die("run setup first", PARTYFILE)
-    P=json.load(open(PARTYFILE))
-    REQ,PROV,WORK,ARB = P["requester"],P["provider"],P["worker"],P["arbiter"]
-    PKG, DSO = pkgid(), dso()
-    TE=f"{PKG}:TaskEscrow:TaskEscrow"; INST={"admin":DSO,"id":"Amulet"}
-    REF="live-"+uuid.uuid4().hex[:8]; REWARD="100.0"
-    # ONE fixed time base for the whole run: createdAt/deadline must be byte-identical between
-    # the escrow's stored fields and the allocation spec (SettlePayment asserts SettlementInfo ==).
-    _b=datetime.datetime.now(datetime.timezone.utc)
-    iso=lambda d:(_b+datetime.timedelta(seconds=d)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    CREATED, DEADLINE, SETTLEB = iso(-120), iso(3600), iso(3600+86400)
-    print("REF",REF,"| pkg",PKG[:12],"| dso",DSO[:16])
+# -------------------------------------------------------------------- shared flow helpers
+def _ctx(): return REQ,PROV,WORK,ARB,TE,INST,DSO,CREATED,DEADLINE,SETTLEB
 
-    # tap real Amulet to the requester's wallet
-    st,_=post(f"{VAL}/api/validator/v0/wallet/tap", {"amount":"1000.0"}, tok=WTOK)
-    print("tap 1000 Amulet:", st)
-    w0=sum(a for _,a in holdings(WORK))
+def _exercise(esc, choice, arg, act, disclosed=None):
+    st,r=submit([{"ExerciseCommand":{"templateId":TE,"contractId":esc,"choice":choice,"choiceArgument":arg}}],act,disclosed=disclosed)
+    st==200 or die(choice.lower(),r)
+    return r
 
-    # create -> accept -> complete
+def create_completed(REF, REWARD):
+    """create -> accept -> complete; returns the Completed escrow cid."""
     ce={"CreateCommand":{"templateId":TE,"createArguments":{"provider":PROV,"requester":REQ,"worker":WORK,
         "arbiter":ARB,"taskRef":REF,"amount":REWARD,"instrumentId":INST,"status":"Created",
         "createdAt":CREATED,"deadline":DEADLINE,"resultRef":None}}}
-    st,r=submit([ce],[PROV,REQ]);  st==200 or die("create",r); esc=ev_created(r,":TaskEscrow:TaskEscrow")["contractId"]
-    st,r=submit([{"ExerciseCommand":{"templateId":TE,"contractId":esc,"choice":"Accept","choiceArgument":{}}}],[WORK]); st==200 or die("accept",r); esc=ev_created(r,":TaskEscrow:TaskEscrow")["contractId"]
-    st,r=submit([{"ExerciseCommand":{"templateId":TE,"contractId":esc,"choice":"Complete","choiceArgument":{"completionRef":"artifact-1"}}}],[WORK]); st==200 or die("complete",r); esc=ev_created(r,":TaskEscrow:TaskEscrow")["contractId"]
+    st,r=submit([ce],[PROV,REQ]); st==200 or die("create",r); esc=ev_created(r,":TaskEscrow:TaskEscrow")["contractId"]
+    esc=ev_created(_exercise(esc,"Accept",{},[WORK]),":TaskEscrow:TaskEscrow")["contractId"]
+    esc=ev_created(_exercise(esc,"Complete",{"completionRef":"artifact-1"},[WORK]),":TaskEscrow:TaskEscrow")["contractId"]
     print("escrow Created->Accepted->Completed:", esc[:20])
+    return esc
 
-    # fund the allocation via the real Amulet registry factory
+def fund_allocation(REF, REWARD):
+    """Requester locks REWARD Amulet into the escrow's CIP-0056 allocation. Returns (alloc_cid, ace, sync)."""
     inputs=[c for c,_ in holdings(REQ)]
     settlement={"executor":PROV,"settlementRef":{"id":REF,"cid":None},"requestedAt":CREATED,
         "allocateBefore":DEADLINE,"settleBefore":SETTLEB,"meta":{"values":{}}}
@@ -167,22 +160,84 @@ def run():
     st,r=submit([{"ExerciseCommand":{"templateId":f"{AINST}:Splice.Api.Token.AllocationInstructionV1:AllocationFactory",
         "contractId":fac["factoryId"],"choice":"AllocationFactory_Allocate","choiceArgument":args}}],[REQ],disclosed=disc); st==200 or die("allocate",r)
     ace=ev_created(r,":Splice.AmuletAllocation:AmuletAllocation"); ace or die("no allocation",r)
-    alloc=ace["contractId"]; print("Amulet allocation funded:", alloc[:20])
+    print("Amulet allocation funded:", ace["contractId"][:20])
+    return ace["contractId"], ace, disc[0]["synchronizerId"]
 
-    # worker settles: SettlePayment -> Allocation_ExecuteTransfer -> Paid
-    # the SV scan/registry ingests new contracts asynchronously — retry until it sees the allocation
+def settle_via(esc, choice, alloc, ace, sync, kind, act):
+    """Fetch the registry choice-context for `kind`, disclose the allocation to `act`, and
+    exercise a value-moving TaskEscrow `choice`. The scan/registry ingests asynchronously,
+    so retry until it sees the allocation."""
     import time
     for _ in range(15):
-        st,tc=post(f"{SVN}/registry/allocations/v1/{alloc}/choice-contexts/execute-transfer", {"meta":{}}, tok=None, host="scan.localhost")
+        st,tc=post(f"{SVN}/registry/allocations/v1/{alloc}/choice-contexts/{kind}", {"meta":{}}, tok=None, host="scan.localhost")
         if st==200: break
         time.sleep(2)
-    st==200 or die("transfer ctx",tc)
+    st==200 or die(f"{kind} ctx",tc)
     tdisc=[{k:d[k] for k in ("templateId","contractId","createdEventBlob","synchronizerId")} for d in tc["disclosedContracts"]]
-    tdisc.append({"templateId":ace["templateId"],"contractId":alloc,"createdEventBlob":ace["createdEventBlob"],"synchronizerId":disc[0]["synchronizerId"]})
-    st,r=submit([{"ExerciseCommand":{"templateId":TE,"contractId":esc,"choice":"SettlePayment",
-        "choiceArgument":{"allocationCid":alloc,"extraArgs":{"context":tc["choiceContextData"],"meta":{"values":{}}}}}}],[WORK],disclosed=tdisc); st==200 or die("settle",r)
+    tdisc.append({"templateId":ace["templateId"],"contractId":alloc,"createdEventBlob":ace["createdEventBlob"],"synchronizerId":sync})
+    return _exercise(esc, choice, {"allocationCid":alloc,"extraArgs":{"context":tc["choiceContextData"],"meta":{"values":{}}}}, act, disclosed=tdisc)
+
+def _init(label):
+    """Load parties + a single fixed time base, tap the requester, print a header."""
+    global REQ,PROV,WORK,ARB,TE,INST,DSO,CREATED,DEADLINE,SETTLEB
+    if not os.path.exists(PARTYFILE): die("run setup first", PARTYFILE)
+    P=json.load(open(PARTYFILE)); REQ,PROV,WORK,ARB=P["requester"],P["provider"],P["worker"],P["arbiter"]
+    PKG=pkgid(); DSO=dso(); TE=f"{PKG}:TaskEscrow:TaskEscrow"; INST={"admin":DSO,"id":"Amulet"}
+    REF="live-"+uuid.uuid4().hex[:8]
+    # ONE fixed time base: createdAt/deadline must be byte-identical between the escrow's stored
+    # fields and the allocation spec (the Settle* choices assert SettlementInfo ==).
+    _b=datetime.datetime.now(datetime.timezone.utc)
+    iso=lambda d:(_b+datetime.timedelta(seconds=d)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    CREATED,DEADLINE,SETTLEB=iso(-120),iso(3600),iso(3600+86400)
+    print(f"[{label}] REF",REF,"| pkg",PKG[:12],"| dso",DSO[:16])
+    st,_=post(f"{VAL}/api/validator/v0/wallet/tap", {"amount":"1000.0"}, tok=WTOK); print("tap 1000 Amulet:", st)
+    return REF
+
+# -------------------------------------------------------------------- run (happy path: worker paid)
+def run():
+    REF=_init("happy"); REWARD="100.0"
+    w0=sum(a for _,a in holdings(WORK))
+    esc=create_completed(REF, REWARD)
+    alloc,ace,sync=fund_allocation(REF, REWARD)
+    # worker settles: SettlePayment -> Allocation_ExecuteTransfer -> Paid
+    settle_via(esc, "SettlePayment", alloc, ace, sync, "execute-transfer", [WORK])
     w1=sum(a for _,a in holdings(WORK))
     print(f"\n*** SETTLED on the live node ***  worker Amulet: {w0} -> {w1}  (+{round(w1-w0,4)})  escrow -> Paid")
 
+# -------------------------------------------------------------------- dispute -> real refund
+def dispute_refund():
+    """Funds are LOCKED, then a dispute resolves for the requester and the locked Amulet is
+    actually returned (SettleResolveRefund -> Allocation_Withdraw). Worker paid nothing."""
+    REF=_init("dispute-refund"); REWARD="100.0"
+    r0=sum(a for _,a in holdings(REQ))
+    esc=create_completed(REF, REWARD)
+    alloc,ace,sync=fund_allocation(REF, REWARD)
+    r1=sum(a for _,a in holdings(REQ)); print(f"requester Amulet after funding (locked): {r0} -> {r1}")
+    # requester contests the result -> Disputed
+    esc=ev_created(_exercise(esc,"Dispute",{"raisedBy":REQ},[REQ]),":TaskEscrow:TaskEscrow")["contractId"]
+    print("escrow -> Disputed:", esc[:20])
+    # arbiter rules for the requester and returns the locked funds for real
+    settle_via(esc, "SettleResolveRefund", alloc, ace, sync, "withdraw", [ARB])
+    r2=sum(a for _,a in holdings(REQ)); w=sum(a for _,a in holdings(WORK))
+    print(f"\n*** DISPUTE REFUNDED on the live node ***  requester Amulet: {r1} (locked) -> {r2}  (returned ~{round(r2-r1,4)})")
+    print(f"    worker Amulet: {w}  (paid nothing)  escrow -> Refunded")
+
+# -------------------------------------------------------------------- dispute -> pay worker
+def dispute_pay():
+    """A dispute resolves for the worker, who is paid for real (SettleResolvePayWorker ->
+    Allocation_ExecuteTransfer, jointly authorized by [arbiter, worker])."""
+    REF=_init("dispute-pay"); REWARD="100.0"
+    w0=sum(a for _,a in holdings(WORK))
+    esc=create_completed(REF, REWARD)
+    alloc,ace,sync=fund_allocation(REF, REWARD)
+    # worker contests the lack of approval -> Disputed
+    esc=ev_created(_exercise(esc,"Dispute",{"raisedBy":WORK},[WORK]),":TaskEscrow:TaskEscrow")["contractId"]
+    print("escrow -> Disputed:", esc[:20])
+    # arbiter rules for the worker; the worker claims (joint arbiter+worker authority)
+    settle_via(esc, "SettleResolvePayWorker", alloc, ace, sync, "execute-transfer", [ARB,WORK])
+    w1=sum(a for _,a in holdings(WORK))
+    print(f"\n*** DISPUTE PAID on the live node ***  worker Amulet: {w0} -> {w1}  (+{round(w1-w0,4)})  escrow -> Paid")
+
 if __name__ == "__main__":
-    {"setup":setup,"run":run}.get(sys.argv[1] if len(sys.argv)>1 else "run", run)()
+    {"setup":setup,"run":run,"dispute-refund":dispute_refund,"dispute-pay":dispute_pay}.get(
+        sys.argv[1] if len(sys.argv)>1 else "run", run)()
