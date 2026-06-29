@@ -96,8 +96,16 @@ through the REST `settle` endpoint).
 - [ ] **External-party signing** (`prepare`/`execute`) so agents self-custody instead of the
   backend holding `CanActAs` — also unlocks the cross-participant privacy story (M2 note).
 
-## M5 — Frontend + agent orchestration
-- Reuse the Sage product shell (re-pointed to the backend, not viem).
+## M5 — Frontend + agent orchestration 🟡 (demo UI done, 2026-06-29)
+- [x] **Mini demo UI** built from scratch in `frontend/` (zero-build vanilla SPA, served by
+  the backend at `/`). Provisions a live session, funds + creates tasks, drives the full
+  lifecycle (accept → complete → 💸 settle), shows the worker's real Canton Coin balance
+  rising, and a **perspective switcher** that demonstrates privacy live (the `outsider`
+  party sees 0 escrows). All backend interactions verified end-to-end.
+  - The EVM Sage product shell isn't available in this repo; built a focused Canton-native
+    UI instead. Re-skinning to the Sage shell later is a presentation-layer swap.
+- [ ] Agent orchestration: wire a real AI pipeline as the worker (create → agent does work
+  → complete → settle; plus a deliberately-failed run showing funds NOT released).
 - Port ONE useful-output pipeline (per Sage ADR-0020, 2026-06-10 — the old
   summarize/translate/sentiment/vision modes are deprecated). Candidates:
   - **Website pipeline** (copywriter → builder → packager; artifact = zip + README;

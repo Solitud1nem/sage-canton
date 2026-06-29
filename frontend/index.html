@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sage · Canton</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">🌿</span>
+      <div>
+        <h1>Sage <span class="on">on Canton</span></h1>
+        <p class="tag">Privacy-native task escrow for AI agents · settled in Canton Coin</p>
+      </div>
+    </div>
+    <div class="net" id="net"><span class="dot"></span> connecting…</div>
+  </header>
+
+  <main>
+    <!-- Session / provisioning -->
+    <section class="card session" id="sessionCard">
+      <div class="row between">
+        <h2>Demo session</h2>
+        <button id="provisionBtn" class="primary">Start session</button>
+      </div>
+      <p class="muted" id="sessionHint">Spin up a fresh set of parties on the live node and tap Canton Coin into the requester's wallet.</p>
+      <div class="parties hidden" id="parties"></div>
+    </section>
+
+    <!-- Perspective + privacy -->
+    <section class="card hidden" id="viewCard">
+      <div class="row between">
+        <h2>Ledger view</h2>
+        <div class="perspective" id="perspective"></div>
+      </div>
+      <p class="muted">Each party sees only the escrows it is a stakeholder of — switch perspective to watch Canton's sub-transaction privacy in action.</p>
+      <div id="privacyNote"></div>
+    </section>
+
+    <!-- Create -->
+    <section class="card hidden" id="createCard">
+      <h2>New task</h2>
+      <div class="form">
+        <label>Reference <input id="taskRef" placeholder="summarise-q3-report" /></label>
+        <label>Reward (CC) <input id="amount" type="number" value="100" min="1" step="1" /></label>
+        <button id="createBtn" class="primary">Fund &amp; create</button>
+      </div>
+    </section>
+
+    <!-- Tasks -->
+    <section class="card hidden" id="tasksCard">
+      <div class="row between">
+        <h2>Tasks <span class="count" id="taskCount">0</span></h2>
+        <span class="bal" id="workerBal"></span>
+      </div>
+      <div id="tasks" class="tasks"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -34,9 +34,13 @@ is still handy as a type reference; not required at runtime.)
 npm install
 npm run typecheck                 # tsc --noEmit
 npm run demo                      # provision parties, tap, create->...->settle on a live node
-PORT=8088 npm run dev             # REST API (tsx watch)
+PORT=8088 npm run dev             # REST API + demo UI (tsx watch)
 # optional automation: AUTOMATION_PROVIDER=<party> AUTO_SETTLE=0 npm run dev
 ```
+
+The server also serves the **demo UI** (`../frontend/`) at `http://localhost:8088/` — click
+*Start session* → *Fund & create* → *Accept* → *Complete* → *Settle*, and flip the
+perspective to `outsider` to watch sub-transaction privacy (it sees 0 escrows).
 
 Prereqs: LocalNet up + this project's DAR uploaded (`PACKAGE_ID` defaults to the 0.1.2 build;
 override via env after a rebuild). See `../docs/setup/toolchain-and-references.md` §4.
