@@ -30,7 +30,9 @@ import json, urllib.request, hmac, hashlib, base64, datetime, uuid, sys, glob, o
 AU   = "http://localhost:2975"   # app-user participant — JSON Ledger API
 VAL  = "http://localhost:2903"   # app-user validator — wallet API (tap)
 SVN  = "http://localhost:4000"   # SV nginx — proxies /registry to the Amulet registry
-DAR  = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "..", ".daml", "dist", "sage-canton-*.dar")))[-1]
+# the production DAR only — exclude the sibling sage-canton-tests-*.dar (Script tests, never uploaded)
+DAR  = sorted(d for d in glob.glob(os.path.join(os.path.dirname(__file__), "..", ".daml", "dist", "sage-canton-*.dar"))
+              if "-tests-" not in os.path.basename(d))[-1]
 AINST= "275064aacfe99cea72ee0c80563936129563776f67415ef9f13e4297eecbc520"  # allocation-instruction-v1
 HOLDING_IFACE = "718a0f77e505a8de22f188bd4c87fe74101274e9d4cb1bfac7d09aec7158d35b:Splice.Api.Token.HoldingV1:Holding"
 PARTYFILE = os.path.join(os.path.dirname(__file__), "..", ".daml", "live-parties.json")

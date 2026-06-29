@@ -6,31 +6,29 @@
 # When targeting TestNet/DevNet, bump to the SDK paired with that network (3.5.1 as of
 # 2026-06) and re-verify against the Version Compatibility dashboard.
 #
-# LF target 2.2: required because the test harness (splice-token-standard-test) and
-# splice-amulet are LF 2.2; the bare CIP-0056 interfaces are 2.1 (forward-compatible).
+# LF target 2.2: kept (not 2.1) so the package id stays stable vs the DAR already uploaded
+# to LocalNet; the bare CIP-0056 interfaces this package codes against are LF 2.1
+# (forward-compatible). A 2.2 package may depend on the 2.1 interface DARs.
 #
-# NOTE (follow-up, tracked in PLANNING M1): splice-amulet + splice-token-standard-test are
-# only needed by daml/Tests/TestSettlement.daml. Split the Script tests into their own
-# package so the production TaskEscrow DAR depends ONLY on the splice-api-token-*-v1
-# interfaces (no daml-script / amulet bloat) before any non-test DAR upload.
+# This is the PRODUCTION package: only the TaskEscrow + AgentRegistry templates and the
+# splice-api-token-*-v1 interfaces — NO daml-script / splice-amulet / token-standard-test,
+# so the uploaded DAR doesn't bloat the participant package store. The Daml Script tests
+# (which DO need those) live in the sibling `daml-tests/` package; build/test both via the
+# `multi-package.yaml` at the repo root (`dpm build --all`, `dpm test --all`).
 sdk-version: 3.4.11
 name: sage-canton
 source: daml
-version: 0.1.3
+version: 0.1.4
 dependencies:
   - daml-prim
   - daml-stdlib
-  - daml-script
 data-dependencies:
-  # CIP-0056 token-standard interfaces — what the TaskEscrow contract codes against (LF 2.1)
+  # CIP-0056 token-standard interfaces — what the TaskEscrow contract codes against (LF 2.1).
+  # Only the ones TaskEscrow actually imports; allocation-instruction / transfer-instruction
+  # are test-only (used by daml-tests, not the production contract).
   - daml/vendor/splice-api-token-metadata-v1-1.0.0.dar
   - daml/vendor/splice-api-token-holding-v1-1.0.0.dar
   - daml/vendor/splice-api-token-allocation-v1-1.0.0.dar
   - daml/vendor/splice-api-token-allocation-request-v1-1.0.0.dar
-  - daml/vendor/splice-api-token-allocation-instruction-v1-1.0.0.dar
-  - daml/vendor/splice-api-token-transfer-instruction-v1-1.0.0.dar
-  # test-only: concrete Amulet impl + mock registry harness (LF 2.2)
-  - daml/vendor/splice-amulet-0.1.14.dar
-  - daml/vendor/splice-token-standard-test-1.0.6.dar
 build-options:
   - --target=2.2

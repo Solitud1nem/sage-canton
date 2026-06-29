@@ -62,11 +62,13 @@ Canton Coin balance increases on settlement; a disputed task returns the locked 
 
 ```
 sage-canton/
-├── daml/                  # Daml model (smart contracts)
+├── daml/                  # PRODUCTION Daml package (the DAR we upload)
 │   ├── TaskEscrow.daml     # escrow state machine + CIP-0056 settlement
 │   ├── AgentRegistry.daml  # agent identity / capability registry
-│   ├── vendor/             # pinned splice-api-token-*-v1 / amulet DARs (build standalone)
-│   └── Tests/              # Daml Script tests (incl. real-token settlement on a mock registry)
+│   └── vendor/             # pinned splice-api-token-*-v1 / amulet DARs (build standalone)
+├── daml-tests/            # Daml Script TEST package (never uploaded; data-depends on daml/)
+│   └── Tests/              # lifecycle + real-token settlement tests (mock Amulet registry)
+├── multi-package.yaml     # builds both packages; keeps daml-script/amulet OUT of the prod DAR
 ├── backend/               # TypeScript: v2 JSON Ledger API + Amulet registry + REST + agent
 │   └── src/agent/          # AI research agent (worker) + paid fact-checker (arbiter)
 ├── frontend/              # zero-build demo UI (served by the backend)
@@ -75,14 +77,16 @@ sage-canton/
 │   ├── adr/                # architecture decision records (0016 = this fork)
 │   ├── architecture/       # overview + settlement design
 │   └── setup/              # verified toolchain + LocalNet/live-settlement runbook
-└── daml.yaml              # Daml project file (pin SDK to target network)
+└── daml.yaml              # production Daml project file (pin SDK to target network)
 ```
 
 ## Quick start
 
 ```bash
 # 1. Daml model + tests (incl. real-token settlement on a mock Amulet registry)
-dpm install && dpm build && dpm test          # 12 scripts green
+#    multi-package: the production DAR (daml/) and the Script tests (daml-tests/) are
+#    separate, so the uploaded DAR carries only the CIP-0056 interfaces (no test bloat).
+dpm install && dpm build --all && dpm test --package-root daml-tests   # 14 scripts green
 
 # 2. Live end-to-end on a real node (multi-validator + Canton Coin + wallet)
 #    bring up cn-quickstart LocalNet, then settle a TaskEscrow over HTTP:

@@ -1,0 +1,10 @@
+# Multi-package project: the production `sage-canton` package (templates + CIP-0056
+# interfaces, the DAR we upload) and the `sage-canton-tests` package (Daml Script tests,
+# never uploaded). Keeping tests in their own package keeps daml-script / amulet /
+# token-standard-test OUT of the production DAR (no participant package-store bloat).
+#
+# Build both:  dpm build --all
+# Test:        dpm test --all     (runs the Script tests in ./daml-tests)
+packages:
+  - .
+  - ./daml-tests

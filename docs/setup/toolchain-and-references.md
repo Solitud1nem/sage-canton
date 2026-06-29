@@ -65,7 +65,7 @@ tar xzf jre.tgz && rm jre.tgz                       # -> ~/.local/jdk/jdk-17.x.y
 ```bash
 export JAVA_HOME="$(find "$HOME/.local/jdk" -maxdepth 1 -name 'jdk-17*' | head -1)"
 export PATH="$JAVA_HOME/bin:$HOME/.dpm/bin:$PATH"
-# then: dpm build && dpm test
+# then: dpm build --all && dpm test --package-root daml-tests   (multi-package: prod + tests)
 ```
 
 ---
