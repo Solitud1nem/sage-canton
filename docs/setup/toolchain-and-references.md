@@ -215,6 +215,41 @@ hold `CanActAs` for every party it acts as — `allocateParty`-inside-the-script
 grant that, hence the input-driven script + explicit rights grant (this is also the M4
 backend pattern).
 
+### Live Amulet settlement runbook (VERIFIED end-to-end 2026-06-29)
+
+Settling a `TaskEscrow` in REAL Canton Coin on the running node — all over HTTP, no wallet
+UI. Implemented in `scripts/live_settlement_demo.py` (`setup` then `run`). The exact moves:
+
+1. **Tap Amulet:** `POST http://localhost:2903/api/validator/v0/wallet/tap` `{"amount":"1000.0"}`
+   with a JWT `sub=app-user` (the only wallet user here). Funds the app-user validator's
+   primary party — use THAT as the escrow `requester` (get it from
+   `GET …:2903/api/validator/v0/wallet/user-status` → `party_id`).
+2. **DSO / instrument admin:** `GET …:4000/registry/metadata/v1/info` (Host: `scan.localhost`)
+   → `adminId` = `DSO::1220…`. The Amulet instrument is `{admin: DSO, id: "Amulet"}`.
+3. **Create + drive** the escrow over the JSON Ledger API
+   (`POST …:2975/v2/commands/submit-and-wait-for-transaction`, `actAs` = the parties).
+4. **Fund the allocation via the REAL registry factory** (the quickstart backend does NOT
+   expose this — only execute/withdraw/cancel contexts):
+   `POST …:4000/registry/allocation-instruction/v1/allocation-factory` (Host
+   `scan.localhost`, no auth) with `{"choiceArguments": <AllocationFactory_Allocate args>,
+   "excludeDebitedHoldings": false}` → returns `factoryId`, `choiceContextData`, 3
+   `disclosedContracts`. Then exercise `AllocationFactory_Allocate` on `factoryId` (interface
+   id `…allocation-instruction-v1…:AllocationFactory`, `actAs=[requester]`,
+   `disclosedContracts` attached) → locks Amulet, creates the `AmuletAllocation`.
+5. **Settle:** `POST …:4000/registry/allocations/v1/{allocId}/choice-contexts/execute-transfer`
+   → transfer choice-context + disclosures; then the worker exercises `SettlePayment` on the
+   escrow with `allocationCid` + `extraArgs.context`, attaching those disclosures PLUS the
+   `AmuletAllocation` itself (it's only stakeholdered to dso/sender/executor, so disclose it
+   to the worker). Result: worker's Amulet balance increases by the reward; escrow → Paid.
+
+Gotchas we hit: (a) `settlement.requestedAt` must be ≤ ledger time — use a real timestamp
+slightly in the past, NOT a fixed future one. (b) the escrow's stored `createdAt`/`deadline`
+and the allocation spec's `requestedAt`/`allocateBefore`/`settleBefore` must be byte-identical
+(SettlePayment asserts `SettlementInfo ==`) — compute them from ONE time base per run.
+(c) filter holding inputs to UNLOCKED only (`LockedAmulet` also implements `Holding`).
+(d) the SV scan/registry ingests new contracts async — retry the execute-transfer context
+call until the fresh allocation is visible.
+
 - Repo: https://github.com/digital-asset/cn-quickstart.git
 - Install doc: https://docs.digitalasset.com/build/3.4/quickstart/download/cnqs-installation.html
 - Reference app using the token standard: `quickstart/daml/licensing/` (see §3).

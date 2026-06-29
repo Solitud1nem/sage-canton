@@ -42,7 +42,8 @@ live product). Track 3: Payments / Neobanking / Agentic Commerce.
   real node. **Cross-participant** sub-transaction privacy (requester on app-user 2901,
   worker on app-provider 3901) is the next step and needs external-party signing → M4.
 
-## M3 — CIP-0056 settlement (Amulet for dev, USDCx for prod) 🟢 (core done, 2026-06-29)
+## M3 — CIP-0056 settlement (Amulet for dev, USDCx for prod) ✅ (2026-06-29)
+Proven both in Daml-Script (mock registry) AND on the live LocalNet node (real Amulet).
 Design **ADR-0017**: settle via the CIP-0056 Allocation/DvP primitive, coding against the
 `splice-api-token-*-v1` **interfaces only** (never a concrete token DAR). Instrument is
 config: **Amulet (Canton Coin)** on LocalNet, **USDCx** on TestNet/MainNet via a one-line
@@ -64,8 +65,12 @@ config switch.
   have (unlike licensing where executor=receiver). Solved by making `SettlePayment`
   worker-controlled (provider+requester authority comes from escrow signatories) and
   disclosing the Amulet allocation to the worker at claim time.
-- [ ] Integration-test on LocalNet with **real** Amulet (tap a wallet, fund, settle) — the
-  mock-registry test covers the logic; this proves it end-to-end on the running node.
+- [x] **Real Amulet settlement on the live LocalNet node** (2026-06-29): tap → create →
+  accept → complete → fund allocation via the **real** Amulet registry factory → settle →
+  **worker's on-ledger Amulet balance 0 → 100**, escrow Paid. Driven entirely over HTTP
+  (JSON Ledger API + `splice:5012` registry). Reproducible: `python3
+  scripts/live_settlement_demo.py setup && … run`. Runbook in
+  `docs/setup/toolchain-and-references.md` §4.
 - [ ] Wire dispute settlement (`Resolve` → execute/withdraw) — state machine handles
   Disputed today; the value-moving variant is a follow-up.
 - Follow-up: split Script tests into their own package so the production DAR drops the
