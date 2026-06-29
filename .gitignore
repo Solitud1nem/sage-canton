@@ -25,3 +25,8 @@ secrets/
 .DS_Store
 .vscode/
 .idea/
+
+# AI-assistant context & planning — keep local, never publish
+CLAUDE.md
+AGENTS.md
+PLANNING.md

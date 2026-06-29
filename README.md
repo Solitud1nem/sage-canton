@@ -69,11 +69,9 @@ sage-canton/
 ├── scripts/               # live_settlement_demo.py — settle on a live node over HTTP
 ├── docs/
 │   ├── adr/                # architecture decision records (0016 = this fork)
-│   └── architecture/       # overview + settlement design
-├── daml.yaml              # Daml project file (pin SDK to target network)
-├── CLAUDE.md              # entry point for AI assistants
-├── AGENTS.md              # code standard, prohibitions, commit conventions
-└── PLANNING.md            # milestones toward hackathon submission
+│   ├── architecture/       # overview + settlement design
+│   └── setup/              # verified toolchain + LocalNet/live-settlement runbook
+└── daml.yaml              # Daml project file (pin SDK to target network)
 ```
 
 ## Quick start
@@ -112,8 +110,8 @@ A complete vertical slice, proven on a live Canton node:
   **paid fact-checker** that releases funds only if every citation resolves. Fabricated
   sources → dispute → no payout. Real LLM with `ANTHROPIC_API_KEY`, offline fallback otherwise.
 
-Milestones M1–M5 are complete; see [PLANNING.md](PLANNING.md). M6 (deck, video, deployment)
-is the remaining submission polish.
+The Daml model, real settlement, backend, demo UI and the agent pipeline are all working
+end-to-end on a live node; remaining polish is deployment + presentation.
 
 ## Engineering reference
 

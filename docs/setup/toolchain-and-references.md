@@ -14,7 +14,7 @@ the "verified" date.
 ## 1. Build toolchain — `dpm` (Daml Package Manager)
 
 **Use `dpm`, NOT the legacy `daml` assistant.** This project is on the new toolchain
-(see `CLAUDE.md`, `README.md`). The old `curl https://get.daml.com | sh` installs the
+(see `README.md`). The old `curl https://get.daml.com | sh` installs the
 *legacy* `daml` assistant — **wrong tool, do not use it here.**
 
 - Publisher: **Digital Asset** (creators of Daml/Canton).

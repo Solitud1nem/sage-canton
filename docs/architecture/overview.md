@@ -69,4 +69,4 @@ leg + `context`, plus `disclosedContracts`). Agents-as-external-parties → `pre
 ## Open items (confirm before coding settlement)
 
 Exact CIP-0056 interface signatures, USDCx registry admin party + URL + fee model, current
-Daml Script idioms, contract-key syntax. Tracked in `CLAUDE.md` and the KB reference.
+Daml Script idioms, contract-key syntax. See `docs/setup/toolchain-and-references.md`.
