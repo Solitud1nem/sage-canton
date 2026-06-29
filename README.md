@@ -121,6 +121,9 @@ A complete vertical slice, proven on a live Canton node:
   (`prepare` → sign the tx hash → `execute`). A valid signature commits; a wrong-key signature
   is rejected even though the participant could otherwise relay for it — the key, not the
   operator, is the authority. `scripts/external_signing_demo.py`.
+- **Both combined** — the full institutional story: an external self-custodied worker hosted on
+  App Provider authorizes its action, by signature, on an escrow shared cross-participant with
+  the requester/provider on App User. `scripts/cross_participant_external_demo.py`.
 - **TypeScript backend** — typed v2 JSON Ledger API + Amulet registry clients, REST API,
   idempotent automation (auto-expire / auto-settle).
 - **Demo UI** — fund → create → run agent → settle, with the worker's balance rising.

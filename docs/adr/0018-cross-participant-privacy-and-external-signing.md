@@ -91,11 +91,16 @@ participant must host and what it may authorize.
   stakeholder, and the admin-party/topology plumbing grows; external signing adds client-side
   key management, external-party onboarding, and the two-step prepare/execute flow (more
   round-trips, hash-verification responsibility on the signer).
+- **Both layers combined (demonstrated).** `scripts/cross_participant_external_demo.py` runs
+  the full institutional story in one flow: the worker is onboarded as an *external* party on
+  App Provider (self-custody), the escrow is created on App User with the worker as observer
+  (cross-participant privacy: worker @ App Provider sees 1, outsiders on either participant 0),
+  and the worker exercises `Accept` from App Provider authorized by its own Ed25519 signature
+  (`prepare` on App Provider → sign → `execute`) → the escrow becomes `Accepted`, visible to
+  the App User provider. A privately-shared escrow spanning two organisations whose worker is
+  an external self-custodied agent that authorized its own action across the participant boundary.
 - **Follow-ups:** (a) fold the proven `prepare`/sign/`execute` flow into the backend as a
-  self-custody `EscrowService` path (client-side key store for the agent); (b) combine the two
-  layers — an *external* worker hosted on App Provider exercising its choices by signature
-  (each layer is proven independently; the combination is the full institutional story);
-  (c) settle the cross-participant escrow in real Amulet (the allocation's registry parties
-  span participants — verify disclosure routing); (d) a fresh LocalNet (or per-participant
-  clean vetting) so the production `sage-canton` package, not the `sage-canton-xc` stand-in,
-  runs these paths.
+  self-custody `EscrowService` path (client-side key store for the agent); (b) settle the
+  cross-participant escrow in real Amulet (the allocation's registry parties span participants
+  — verify disclosure routing); (c) a fresh LocalNet (or per-participant clean vetting) so the
+  production `sage-canton` package, not the `sage-canton-xc` stand-in, runs these paths.
