@@ -11,11 +11,14 @@ import { RegistryClient } from './registry.js';
 import { EscrowService } from './escrow.js';
 import { Automation } from './automation.js';
 import { tap, walletParty } from './wallet.js';
+import { AgentRunner } from './agent/runner.js';
+import { llmMode } from './agent/llm.js';
 import type { InstrumentId, Party } from './types.js';
 
 const ledger = new LedgerClient();
 const registry = new RegistryClient();
 const svc = new EscrowService(config.packageId, ledger, registry);
+const runner = new AgentRunner(svc);
 const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'frontend');
 let dso = '';
 
@@ -29,7 +32,7 @@ function route(method: string, path: string, fn: Handler): void {
 const amulet = (i?: InstrumentId): InstrumentId => i ?? { admin: dso, id: 'Amulet' };
 const balance = async (party: Party): Promise<number> => (await ledger.amuletHoldings(party)).reduce((s, h) => s + h.amount, 0);
 
-route('GET', '/health', async () => ({ ok: true, packageId: config.packageId, dso }));
+route('GET', '/health', async () => ({ ok: true, packageId: config.packageId, dso, llm: llmMode() }));
 route('GET', '/balance', async (_p, _b, url) => ({ amulet: await balance(url.searchParams.get('party') ?? '') }));
 route('GET', '/tasks', async (_p, _b, url) => {
   const party = url.searchParams.get('party');
@@ -49,6 +52,13 @@ route('POST', '/tasks/:cid/settle', async (p, b) => {
   return svc.settle(esc);
 });
 route('POST', '/admin/tap', async (_p, b) => { await tap(String(b.amount ?? '1000.0')); return { tapped: b.amount ?? '1000.0', party: await walletParty() }; });
+// Flagship: run the AI research agent + paid fact-checker on a Created task -> conditional
+// settlement (citations resolve = worker paid; fabricated = disputed, no payout).
+route('POST', '/agent/run/:cid', async (p, b) => {
+  const esc = await svc.get(b.provider, p.cid!);
+  if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
+  return runner.run(esc, b.brief);
+});
 // Demo provisioning: requester = the wallet party; allocate the other roles + an outsider
 // (no stake) and grant the backend CanActAs so it can drive every perspective.
 route('POST', '/admin/provision', async () => {

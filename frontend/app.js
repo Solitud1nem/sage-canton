@@ -6,6 +6,8 @@ const short = (p) => (p ? p.split('::')[0] + '::' + p.split('::')[1]?.slice(0, 6
 let session = null;            // { requester, provider, worker, arbiter, outsider }
 let perspective = 'requester';
 let pollTimer = null;
+const briefs = {};             // taskRef -> research brief (off-ledger, UI-side)
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task-' + Math.random().toString(36).slice(2, 7);
 
 async function api(method, path, body) {
   const res = await fetch(API + path, {
@@ -85,6 +87,7 @@ function actionsFor(t) {
   const overdue = Date.parse(t.payload.deadline) <= Date.now();
   const acts = [];
   if (perspective === 'worker') {
+    if (s === 'Created') acts.push(['🤖 Run agent', () => runAgent(t), true]);
     if (s === 'Created') acts.push(['Accept', () => act(t, 'accept', { worker: session.worker })]);
     if (s === 'Accepted') acts.push(['Complete', () => act(t, 'complete', { worker: session.worker, completionRef: 'result-' + t.payload.taskRef })]);
     if (s === 'Completed') acts.push(['💸 Settle (pay me)', () => act(t, 'settle', { provider: session.provider }), true]);
@@ -134,18 +137,38 @@ async function act(t, verb, body) {
 }
 
 async function createTask() {
-  const taskRef = $('taskRef').value.trim() || 'task-' + Math.random().toString(36).slice(2, 7);
+  const brief = $('brief').value.trim() || 'Summarise Canton Network privacy for settlement';
+  const taskRef = slug(brief);
+  briefs[taskRef] = brief;
   const amount = $('amount').value || '100';
   const btn = $('createBtn'); btn.disabled = true;
   try {
     await api('POST', '/tasks', { ...session, taskRef, amount });
-    $('taskRef').value = '';
+    $('brief').value = '';
     toast('Task funded & created');
     await refresh();
   } catch (e) {
     toast(e.message, true);
   } finally {
     btn.disabled = false;
+  }
+}
+
+// One-click flagship: AI agent researches the brief, the paid fact-checker verifies, and
+// settlement is conditional. Drives the backend /agent/run pipeline.
+async function runAgent(t) {
+  try {
+    toast('🤖 agent researching + fact-checking…');
+    const rep = await api('POST', `/agent/run/${encodeURIComponent(t.contractId)}`, {
+      provider: session.provider,
+      brief: briefs[t.payload.taskRef],
+    });
+    toast(rep.outcome === 'paid'
+      ? `✅ fact-check passed — worker paid (${rep.verdict.summary})`
+      : `⛔ ${rep.verdict.summary} → disputed, no payout`, rep.outcome !== 'paid');
+    await refresh();
+  } catch (e) {
+    toast(e.message, true);
   }
 }
 

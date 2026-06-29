@@ -60,6 +60,15 @@ export class EscrowService {
     const tx = await this.ledger.submit([this.exercise(cid, 'Expire')], [provider]);
     return this.created(createdBySuffix(tx, TE_SUFFIX)!);
   }
+  async dispute(cid: ContractId, raisedBy: Party): Promise<EscrowContract> {
+    const tx = await this.ledger.submit([this.exercise(cid, 'Dispute', { raisedBy })], [raisedBy]);
+    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
+  }
+  /** Arbiter resolves a dispute: pay the worker or refund the requester (status only). */
+  async resolve(cid: ContractId, arbiter: Party, payWorker: boolean): Promise<EscrowContract> {
+    const tx = await this.ledger.submit([this.exercise(cid, 'Resolve', { payWorker })], [arbiter]);
+    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
+  }
 
   /** All TaskEscrows visible to a party. */
   async list(party: Party): Promise<EscrowContract[]> {

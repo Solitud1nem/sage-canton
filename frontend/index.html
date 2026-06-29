@@ -42,12 +42,13 @@
 
     <!-- Create -->
     <section class="card hidden" id="createCard">
-      <h2>New task</h2>
+      <h2>New research task</h2>
       <div class="form">
-        <label>Reference <input id="taskRef" placeholder="summarise-q3-report" /></label>
+        <label class="grow">Research brief <input id="brief" placeholder="Summarise what Canton privacy provides for institutional settlement" /></label>
         <label>Reward (CC) <input id="amount" type="number" value="100" min="1" step="1" /></label>
         <button id="createBtn" class="primary">Fund &amp; create</button>
       </div>
+      <p class="muted">An AI agent (the worker) researches the brief; a paid fact-checker (the arbiter) only releases funds if every citation resolves. Tip: include the word <b>unverifiable</b> to force a failed check → dispute → no payout.</p>
     </section>
 
     <!-- Tasks -->

@@ -80,3 +80,6 @@ button.tiny { padding: 6px 11px; font-size: 13px; }
 .toast.err { border-color: var(--red); }
 .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid #0003; border-top-color: currentColor; border-radius: 50%; animation: s .7s linear infinite; vertical-align: -2px; }
 @keyframes s { to { transform: rotate(360deg); } }
+
+.form label.grow { flex: 1 1 320px; }
+.form label.grow input { width: 100%; min-width: 0; }

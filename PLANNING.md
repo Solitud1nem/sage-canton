@@ -96,16 +96,26 @@ through the REST `settle` endpoint).
 - [ ] **External-party signing** (`prepare`/`execute`) so agents self-custody instead of the
   backend holding `CanActAs` — also unlocks the cross-participant privacy story (M2 note).
 
-## M5 — Frontend + agent orchestration 🟡 (demo UI done, 2026-06-29)
+## M5 — Frontend + agent orchestration ✅ (2026-06-29)
 - [x] **Mini demo UI** built from scratch in `frontend/` (zero-build vanilla SPA, served by
   the backend at `/`). Provisions a live session, funds + creates tasks, drives the full
-  lifecycle (accept → complete → 💸 settle), shows the worker's real Canton Coin balance
-  rising, and a **perspective switcher** that demonstrates privacy live (the `outsider`
-  party sees 0 escrows). All backend interactions verified end-to-end.
+  lifecycle, shows the worker's real Canton Coin balance rising, and a **perspective
+  switcher** demonstrating privacy live (the `outsider` party sees 0 escrows).
   - The EVM Sage product shell isn't available in this repo; built a focused Canton-native
     UI instead. Re-skinning to the Sage shell later is a presentation-layer swap.
-- [ ] Agent orchestration: wire a real AI pipeline as the worker (create → agent does work
-  → complete → settle; plus a deliberately-failed run showing funds NOT released).
+- [x] **Flagship agent orchestration** (`backend/src/agent/`): the **research + fact-check**
+  pipeline. The worker is an AI research agent (searcher → synthesizer producing answer +
+  citations; real Anthropic LLM when `ANTHROPIC_API_KEY` is set, deterministic offline
+  fallback otherwise). The arbiter is a **paid fact-checker** that resolves every citation
+  over HTTP. Settlement is conditional:
+  - citations resolve → `SettlePayment` → worker paid in real Canton Coin;
+  - fabricated/unresolvable citation → requester `Dispute` → arbiter `Resolve(refund)` →
+    **worker paid nothing** (funded only on success, so nothing is locked on failure).
+  Both paths verified end-to-end on the live node — `POST /agent/run/:cid`, one-click
+  "🤖 Run agent" in the UI, and `npm run agent-demo`. On-ledger stores only a result hash
+  (content off-ledger = privacy).
+- Live demo flow (achieved): create task → 🤖 agent accepts + researches + completes →
+  fact-check → private settlement (paid) OR deliberately-failed run (disputed, no payout).
 - Port ONE useful-output pipeline (per Sage ADR-0020, 2026-06-10 — the old
   summarize/translate/sentiment/vision modes are deprecated). Candidates:
   - **Website pipeline** (copywriter → builder → packager; artifact = zip + README;

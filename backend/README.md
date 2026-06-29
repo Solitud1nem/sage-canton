@@ -25,8 +25,10 @@ is still handy as a type reference; not required at runtime.)
 | `src/wallet.ts`   | Splice validator wallet API — `tap` test Amulet, resolve the wallet party |
 | `src/escrow.ts`   | `EscrowService` — lifecycle + the fund→settle orchestration |
 | `src/automation.ts` | idempotent reconciliation poller |
-| `src/server.ts`   | REST API (zero-dependency `node:http`) |
-| `src/demo.ts`     | end-to-end smoke test against a live node |
+| `src/server.ts`   | REST API (zero-dependency `node:http`) + static UI hosting |
+| `src/agent/`      | flagship: AI research agent (worker) + paid fact-checker (arbiter) |
+| `src/demo.ts`     | end-to-end settlement smoke test against a live node |
+| `src/agent-demo.ts` | flagship demo: a paid run + a disputed (no-payout) run |
 
 ## Run
 
@@ -34,7 +36,10 @@ is still handy as a type reference; not required at runtime.)
 npm install
 npm run typecheck                 # tsc --noEmit
 npm run demo                      # provision parties, tap, create->...->settle on a live node
+npm run agent-demo                # flagship: AI agent + fact-checker, a paid + a disputed run
 PORT=8088 npm run dev             # REST API + demo UI (tsx watch)
+# real LLM for the research agent (optional; offline fallback otherwise):
+#   ANTHROPIC_API_KEY=sk-... npm run agent-demo
 # optional automation: AUTOMATION_PROVIDER=<party> AUTO_SETTLE=0 npm run dev
 ```
 
