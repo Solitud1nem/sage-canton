@@ -45,18 +45,28 @@ Refunded           Disputed ──Resolve──▶ Paid | Refunded
 Created/Accepted ──▶ Expired ──Refund──▶ Refunded
 ```
 
-Settlement (USDCx) is wired into `Approve` / `Resolve` via the CIP-0056 Allocation (DvP)
-primitive — the requester's funds are locked into an executor-controlled allocation at task
-creation and released atomically on approval. See `daml/TaskEscrow.daml` (TODO markers).
+Settlement is **wired and working** via the CIP-0056 Allocation (DvP) primitive: `TaskEscrow`
+implements the `AllocationRequest` interface, and `SettlePayment` exercises
+`Allocation_ExecuteTransfer` so funds move atomically with the status flip to Paid;
+`SettleRefund` withdraws on reclaim. We code against the `splice-api-token-*-v1` **interfaces
+only**, so the instrument is configuration — **Amulet (Canton Coin)** on LocalNet, **USDCx**
+on Test/MainNet (a one-line switch; see [ADR-0017](docs/adr/0017-settlement-via-cip0056-token-standard.md)).
+Proven both in Daml Script (mock registry) and **end-to-end on a live cn-quickstart node**
+(the worker's real Canton Coin balance increases on settlement).
 
 ## Repo layout
 
 ```
 sage-canton/
 ├── daml/                  # Daml model (smart contracts)
-│   ├── TaskEscrow.daml     # escrow state machine
+│   ├── TaskEscrow.daml     # escrow state machine + CIP-0056 settlement
 │   ├── AgentRegistry.daml  # agent identity / capability registry
-│   └── Tests/              # Daml Script tests
+│   ├── vendor/             # pinned splice-api-token-*-v1 / amulet DARs (build standalone)
+│   └── Tests/              # Daml Script tests (incl. real-token settlement on a mock registry)
+├── backend/               # TypeScript: v2 JSON Ledger API + Amulet registry + REST + agent
+│   └── src/agent/          # AI research agent (worker) + paid fact-checker (arbiter)
+├── frontend/              # zero-build demo UI (served by the backend)
+├── scripts/               # live_settlement_demo.py — settle on a live node over HTTP
 ├── docs/
 │   ├── adr/                # architecture decision records (0016 = this fork)
 │   └── architecture/       # overview + settlement design
@@ -66,20 +76,44 @@ sage-canton/
 └── PLANNING.md            # milestones toward hackathon submission
 ```
 
-## Quick start (local)
+## Quick start
 
 ```bash
-dpm install          # install the Daml SDK pinned in daml.yaml
-dpm build            # compile the Daml model -> DAR
-dpm test             # run Daml Script tests
-dpm sandbox          # single-participant local node
-# multi-validator + Canton Coin + wallet (for USDCx flows): use cn-quickstart LocalNet
+# 1. Daml model + tests (incl. real-token settlement on a mock Amulet registry)
+dpm install && dpm build && dpm test          # 12 scripts green
+
+# 2. Live end-to-end on a real node (multi-validator + Canton Coin + wallet)
+#    bring up cn-quickstart LocalNet, then settle a TaskEscrow over HTTP:
+python3 scripts/live_settlement_demo.py setup && python3 scripts/live_settlement_demo.py run
+#    -> worker's real Amulet balance: 0 -> 100
+
+# 3. Backend + demo UI (talks to the live node)
+cd backend && npm install
+npm run agent-demo        # flagship: AI agent + fact-checker, a paid run + a disputed run
+PORT=8088 npm run dev     # REST API + demo UI at http://localhost:8088
 ```
 
-## Status
+See [docs/setup/toolchain-and-references.md](docs/setup/toolchain-and-references.md) for the
+verified LocalNet bring-up + the live-settlement runbook.
 
-Scaffold. Daml model is a first-cut skeleton; CIP-0056 settlement and the TS backend /
-frontend are not yet wired. See `PLANNING.md`.
+## What works today
+
+A complete vertical slice, proven on a live Canton node:
+
+- **Daml model** — `TaskEscrow` lifecycle + CIP-0056 settlement; 12 Daml-Script tests green.
+- **Real settlement** — worker paid in actual Canton Coin via the Allocation/DvP flow,
+  on a live cn-quickstart node (USDCx is a config switch — [ADR-0017](docs/adr/0017-settlement-via-cip0056-token-standard.md)).
+- **Privacy, demonstrated** — a non-stakeholder party sees **0** escrows on the live ledger
+  (visible in the UI's perspective switcher).
+- **TypeScript backend** — typed v2 JSON Ledger API + Amulet registry clients, REST API,
+  idempotent automation (auto-expire / auto-settle).
+- **Demo UI** — fund → create → run agent → settle, with the worker's balance rising.
+- **Flagship agent pipeline** — the worker is an AI **research agent**; the arbiter is a
+  **paid fact-checker** that releases funds only if every citation resolves. Fabricated
+  sources → dispute → no payout. Real LLM with `ANTHROPIC_API_KEY`, offline fallback otherwise.
+
+Milestones M1–M5 are complete; see [PLANNING.md](PLANNING.md). M6 (deck, video, deployment)
+is the remaining submission polish.
 
 ## Engineering reference
 
