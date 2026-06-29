@@ -11,6 +11,7 @@ module Tests.TestTaskEscrow where
 -- clashes with our TaskStatus.Created; hide it since we never inspect tree events here.
 import Daml.Script hiding (Created)
 import DA.Time (addRelTime, seconds)
+import Splice.Api.Token.HoldingV1 (InstrumentId(..))
 import TaskEscrow
 
 -- Allocate the four parties used across tests.
@@ -41,7 +42,11 @@ createTask p = do
       arbiter   = p.arbiter
       taskRef   = "task-spec-hash-001"
       amount    = 10.0
+      -- placeholder instrument for the pure state-machine tests; real settlement tests
+      -- use the Amulet registry's instrumentId (admin = DSO). See TestSettlement.
+      instrumentId = InstrumentId with admin = p.provider, id = "Amulet"
       status    = Created
+      createdAt = now
       deadline  = addRelTime now (seconds 3600)
       resultRef = None
 

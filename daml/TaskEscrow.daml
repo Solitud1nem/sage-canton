@@ -6,16 +6,35 @@
 -- worker + arbiter as observers) — Canton's sub-transaction privacy means no other
 -- party, and not the synchronizer, can see the terms, amount, or counterparties.
 --
--- This is a SKELETON. The state machine is real; USDCx settlement (CIP-0056
--- Allocation / DvP) is marked with TODOs and wired in a later milestone. See
--- docs/architecture/overview.md and the `platform-canton-network` KB reference.
+-- Settlement is CIP-0056 (token standard). TaskEscrow implements the @AllocationRequest@
+-- interface: the requester's wallet locks @amount@ of @instrumentId@ (Amulet on LocalNet,
+-- USDCx on Test/MainNet — see ADR-0017) into an @Allocation@ whose receiver is the worker
+-- and whose executor is the provider. On approval the provider exercises
+-- @Allocation_ExecuteTransfer@ atomically with the status flip to Paid; refunds use
+-- @Allocation_Withdraw@. We code against the @splice-api-token-*-v1@ interfaces only, so
+-- the concrete token is configuration, not a contract dependency.
 --
 -- Design note: we use an explicit @status@ field + consuming choices (archive old
 -- state, create next) to mirror the Sage EVM enum 1:1 and ease the mental jump for
--- Solidity devs. A more idiomatic Daml alternative is a separate template per state;
--- revisit if the status-field approach gets unwieldy.
+-- Solidity devs. The pure-status choices (Approve/Resolve/Refund) drive the lifecycle
+-- WITHOUT moving money (used by the model tests); the Settle* choices additionally
+-- execute the on-ledger token transfer against a funded allocation.
 
 module TaskEscrow where
+
+import DA.Time (addRelTime, hours)
+import DA.TextMap qualified as TextMap
+import DA.Optional (fromSome)
+import DA.Assert ((===))
+
+import Splice.Api.Token.MetadataV1 (ExtraArgs, ChoiceExecutionMetadata(..), emptyMetadata)
+import Splice.Api.Token.HoldingV1 (InstrumentId)
+import Splice.Api.Token.AllocationV1
+import Splice.Api.Token.AllocationRequestV1
+
+-- | Identifier of the single payment leg in this escrow's settlement.
+taskPaymentLegId : Text
+taskPaymentLegId = "taskPayment"
 
 -- | Lifecycle states, mirroring the Sage EVM TaskEscrow enum.
 data TaskStatus
@@ -30,15 +49,17 @@ data TaskStatus
 
 template TaskEscrow
   with
-    provider  : Party           -- ^ sage-canton app/registry operator; escrow controller + settlement executor
-    requester : Party           -- ^ party that funds the task
-    worker    : Party           -- ^ agent performing the task
-    arbiter   : Party           -- ^ dispute resolver / auditor (observer only)
-    taskRef   : Text            -- ^ off-ledger task spec id / content hash (keep terms off-ledger; store a hash)
-    amount    : Decimal         -- ^ USDCx amount (settlement handles minor units / instrument id)
-    status    : TaskStatus
-    deadline  : Time            -- ^ accept/complete deadline -> Expired
-    resultRef : Optional Text   -- ^ worker's completion artifact id / hash
+    provider     : Party           -- ^ sage-canton app/registry operator; escrow controller + settlement executor
+    requester    : Party           -- ^ party that funds the task (allocation sender)
+    worker       : Party           -- ^ agent performing the task (allocation receiver)
+    arbiter      : Party           -- ^ dispute resolver / auditor (observer only)
+    taskRef      : Text            -- ^ off-ledger task spec id / content hash; also the settlement Reference id
+    amount       : Decimal         -- ^ payment amount, denominated in `instrumentId`
+    instrumentId : InstrumentId    -- ^ settlement instrument (Amulet on LocalNet, USDCx on Test/MainNet)
+    status       : TaskStatus
+    createdAt    : Time            -- ^ ledger time at funding; the settlement `requestedAt`
+    deadline     : Time            -- ^ accept/complete deadline -> Expired; the allocation `allocateBefore`
+    resultRef    : Optional Text   -- ^ worker's completion artifact id / hash
   where
     signatory provider, requester
     observer worker, arbiter
@@ -58,13 +79,11 @@ template TaskEscrow
         assertMsg "task must be Accepted" (status == Accepted)
         create this with status = Completed, resultRef = Some completionRef
 
-    -- | Requester approves the completed work -> release funds to worker.
+    -- | Requester approves the completed work (status only; see SettlePayment to also move funds).
     choice Approve : ContractId TaskEscrow
       controller requester
       do
         assertMsg "task must be Completed" (status == Completed)
-        -- TODO(settlement): exercise the USDCx registry's Allocation_ExecuteTransfer
-        -- (CIP-0056 DvP) to release the locked allocation to the worker atomically.
         create this with status = Paid
 
     -- | Either side escalates to the arbiter.
@@ -76,22 +95,19 @@ template TaskEscrow
         assertMsg "disputable only after acceptance" (status == Accepted || status == Completed)
         create this with status = Disputed
 
-    -- | Arbiter resolves a dispute: pay the worker or refund the requester.
+    -- | Arbiter resolves a dispute: pay the worker or refund the requester (status only).
     choice Resolve : ContractId TaskEscrow
       with payWorker : Bool
       controller arbiter
       do
         assertMsg "must be Disputed" (status == Disputed)
-        -- TODO(settlement): on payWorker -> Allocation_ExecuteTransfer to worker;
-        -- otherwise -> Allocation_Withdraw / refund to requester.
         create this with status = if payWorker then Paid else Refunded
 
-    -- | Requester reclaims funds for a task that was never accepted, or that expired.
+    -- | Requester reclaims funds for a task that was never accepted, or that expired (status only).
     choice Refund : ContractId TaskEscrow
       controller requester
       do
         assertMsg "refundable only from Created or Expired" (status == Created || status == Expired)
-        -- TODO(settlement): Allocation_Withdraw the requester's locked allocation.
         create this with status = Refunded
 
     -- | Provider marks an overdue task Expired (after the deadline).
@@ -102,3 +118,68 @@ template TaskEscrow
         assertMsg "deadline not yet reached" (now >= deadline)
         assertMsg "only Created or Accepted tasks expire" (status == Created || status == Accepted)
         create this with status = Expired
+
+    -- | Settle a completed task: atomically execute the CIP-0056 transfer of the funded
+    -- allocation (requester -> worker) and mark the escrow Paid. The worker exercises this
+    -- to claim their earned payment; the allocation's controllers are
+    -- [executor=provider, sender=requester, receiver=worker] and the provider+requester
+    -- authority is contributed by them being escrow signatories, so a single worker submit
+    -- suffices. The requester's protection before settlement is `Dispute`. `extraArgs`
+    -- carries the registry's off-ledger transfer choice-context (disclosures supplied
+    -- alongside at submission time).
+    choice SettlePayment : ContractId TaskEscrow
+      with
+        allocationCid : ContractId Allocation
+        extraArgs     : ExtraArgs
+      controller worker
+      do
+        assertMsg "task must be Completed" (status == Completed)
+        allocView <- fmap (view @Allocation) (fetch allocationCid)
+        let reqView      = view (toInterface @AllocationRequest this)
+            expectedLeg  = fromSome (TextMap.lookup taskPaymentLegId reqView.transferLegs)
+        -- the funded allocation must match exactly what this escrow requested
+        expectedLeg          === allocView.allocation.transferLeg
+        reqView.settlement   === allocView.allocation.settlement
+        _ <- exercise allocationCid (Allocation_ExecuteTransfer with extraArgs)
+        create this with status = Paid
+
+    -- | Refund a funded-but-unaccepted/expired task: the requester (allocation sender)
+    -- withdraws the locked allocation and the escrow becomes Refunded.
+    choice SettleRefund : ContractId TaskEscrow
+      with
+        allocationCid : ContractId Allocation
+        extraArgs     : ExtraArgs
+      controller requester
+      do
+        assertMsg "refundable only from Created or Expired" (status == Created || status == Expired)
+        _ <- exercise allocationCid (Allocation_Withdraw with extraArgs)
+        create this with status = Refunded
+
+    -- | CIP-0056 AllocationRequest: the requester's wallet reads this to fund the task by
+    -- creating an `Allocation` (locking `amount` of `instrumentId`) for the worker.
+    interface instance AllocationRequest for TaskEscrow where
+      view = AllocationRequestView with
+        settlement = SettlementInfo with
+          executor      = provider
+          settlementRef = Reference with id = taskRef, cid = None
+          requestedAt   = createdAt
+          allocateBefore = deadline
+          settleBefore   = deadline `addRelTime` hours 24
+          meta          = emptyMetadata
+        transferLegs = TextMap.fromList
+          [ ( taskPaymentLegId
+            , TransferLeg with
+                sender       = requester
+                receiver     = worker
+                amount       = amount
+                instrumentId = instrumentId
+                meta         = emptyMetadata
+            )
+          ]
+        meta = emptyMetadata
+
+      allocationRequest_RejectImpl _ _ =
+        pure ChoiceExecutionMetadata with meta = emptyMetadata
+
+      allocationRequest_WithdrawImpl _ _ =
+        pure ChoiceExecutionMetadata with meta = emptyMetadata

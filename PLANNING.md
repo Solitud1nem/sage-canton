@@ -42,29 +42,34 @@ live product). Track 3: Payments / Neobanking / Agentic Commerce.
   real node. **Cross-participant** sub-transaction privacy (requester on app-user 2901,
   worker on app-provider 3901) is the next step and needs external-party signing → M4.
 
-## M3 — CIP-0056 settlement (Amulet for dev, USDCx for prod)
-Design decided in **ADR-0017** (2026-06-29): settle via the CIP-0056 Allocation/DvP
-primitive, coding against the `splice-api-token-*-v1` **interfaces only** (never a concrete
-token DAR). Instrument is config: **Amulet (Canton Coin)** on LocalNet, **USDCx** on
-TestNet/MainNet via a one-line config switch.
-- Research done (2026-06-29): USDCx is **not** on LocalNet/DevNet → dev on Amulet
-  (`instrumentId = "Amulet"`). USDCx admin-party + registry URLs (MainNet/TestNet) + fee
-  model (read from factory response, not fixed) captured in
-  `docs/setup/toolchain-and-references.md` §3.
-- [ ] Add `InstrumentId` field + allocation-cid ref to `TaskEscrow`; wire
-  `Approve`/`Resolve`/`Refund`/`Expire` to Allocation/DvP (`AllocationFactory_Allocate` at
-  funding, `Allocation_ExecuteTransfer` / `_Withdraw` / `_Cancel`).
-- [ ] Pull exact `splice-api-token-allocation-instruction-v1` factory choice signatures.
-- [ ] Unit-test with `splice-token-standard-test` mock registry; integration-test on
-  LocalNet with real Amulet.
-- [ ] Demonstrate an atomic task-output-for-payment settlement.
-- ⚠️ Version-alignment risk: our project is pinned to SDK **3.5.1**; cn-quickstart LocalNet
-  runs **3.4.11** with splice token DARs at **1.0.0**. Verify our DAR uploads to the 3.4.x
-  participant and that `data-dependencies` on the 1.0.0 DARs compile from a 3.5.1 project;
-  if not, align our `daml.yaml` to the LocalNet runtime for the settlement package.
-- Reference impl to copy: `cn-quickstart/quickstart/daml/licensing/.../License.daml`
-  (`Allocation_ExecuteTransfer` pay-leg + `AllocationRequest` interface) — see
-  `docs/setup/toolchain-and-references.md` §3.
+## M3 — CIP-0056 settlement (Amulet for dev, USDCx for prod) 🟢 (core done, 2026-06-29)
+Design **ADR-0017**: settle via the CIP-0056 Allocation/DvP primitive, coding against the
+`splice-api-token-*-v1` **interfaces only** (never a concrete token DAR). Instrument is
+config: **Amulet (Canton Coin)** on LocalNet, **USDCx** on TestNet/MainNet via a one-line
+config switch.
+- [x] USDCx research (2026-06-29): not on LocalNet → dev on Amulet; admin parties + registry
+  URLs + fee model captured in `docs/setup/toolchain-and-references.md` §3.
+- [x] **`TaskEscrow` implements `AllocationRequest`** (executor=provider, leg
+  requester→worker, `instrumentId`+`createdAt` fields) and has settlement choices
+  `SettlePayment` (worker claims → `Allocation_ExecuteTransfer`) and `SettleRefund`
+  (requester → `Allocation_Withdraw`). Coded against the interfaces in `daml/vendor/`.
+- [x] **Real token movement proven** — `daml/Tests/TestSettlement.daml` runs the full flow
+  on the `splice-token-standard-test` mock Amulet registry: tap → fund allocation
+  (`AllocationFactory_Allocate`) → settle → **worker's Amulet balance actually increases**
+  (`testSettlementPaysWorker`); plus a refund path (`testSettlementRefunds`). 12/12 `dpm
+  test` green.
+- [x] Version-alignment **resolved**: project pinned to **SDK 3.4.11** (matches LocalNet
+  runtime AND the harness's daml-script — their `Script` types must unify); LF target 2.2.
+- Auth note: settlement needs receiver (worker) authority, which a lone executor doesn't
+  have (unlike licensing where executor=receiver). Solved by making `SettlePayment`
+  worker-controlled (provider+requester authority comes from escrow signatories) and
+  disclosing the Amulet allocation to the worker at claim time.
+- [ ] Integration-test on LocalNet with **real** Amulet (tap a wallet, fund, settle) — the
+  mock-registry test covers the logic; this proves it end-to-end on the running node.
+- [ ] Wire dispute settlement (`Resolve` → execute/withdraw) — state machine handles
+  Disputed today; the value-moving variant is a follow-up.
+- Follow-up: split Script tests into their own package so the production DAR drops the
+  amulet/token-standard-test/daml-script bloat (see `daml.yaml` note).
 
 ## M4 — Backend + JSON Ledger API
 - TS backend (`dpm codegen-js` bindings) over the JSON Ledger API; PQS for reads.

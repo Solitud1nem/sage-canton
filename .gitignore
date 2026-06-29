@@ -1,6 +1,9 @@
 # Daml
 .daml/
 *.dar
+# ...but DO commit vendored CIP-0056 / Amulet dependency DARs so the repo builds standalone
+!daml/vendor/
+!daml/vendor/*.dar
 
 # Codegen output
 generated-ts/

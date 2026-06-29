@@ -1,8 +1,19 @@
 # Daml project file for sage-canton.
-# IMPORTANT: pin sdk-version to the Daml SDK paired with your TARGET Canton network's
-# protocol version before deploying. As of 2026-06: MainNet damlSdk 3.4.12,
-# TestNet/DevNet damlSdk 3.5.1. Verify with the Version Compatibility dashboard.
-sdk-version: 3.5.1
+#
+# Pinned to SDK 3.4.11 to match the cn-quickstart LocalNet runtime AND the daml-script
+# version used by the splice token-standard test harness (the mock Amulet registry's
+# `Script` type must unify with ours — see ADR-0017 / toolchain-and-references.md §3).
+# When targeting TestNet/DevNet, bump to the SDK paired with that network (3.5.1 as of
+# 2026-06) and re-verify against the Version Compatibility dashboard.
+#
+# LF target 2.2: required because the test harness (splice-token-standard-test) and
+# splice-amulet are LF 2.2; the bare CIP-0056 interfaces are 2.1 (forward-compatible).
+#
+# NOTE (follow-up, tracked in PLANNING M1): splice-amulet + splice-token-standard-test are
+# only needed by daml/Tests/TestSettlement.daml. Split the Script tests into their own
+# package so the production TaskEscrow DAR depends ONLY on the splice-api-token-*-v1
+# interfaces (no daml-script / amulet bloat) before any non-test DAR upload.
+sdk-version: 3.4.11
 name: sage-canton
 source: daml
 version: 0.1.1
@@ -10,5 +21,16 @@ dependencies:
   - daml-prim
   - daml-stdlib
   - daml-script
+data-dependencies:
+  # CIP-0056 token-standard interfaces — what the TaskEscrow contract codes against (LF 2.1)
+  - daml/vendor/splice-api-token-metadata-v1-1.0.0.dar
+  - daml/vendor/splice-api-token-holding-v1-1.0.0.dar
+  - daml/vendor/splice-api-token-allocation-v1-1.0.0.dar
+  - daml/vendor/splice-api-token-allocation-request-v1-1.0.0.dar
+  - daml/vendor/splice-api-token-allocation-instruction-v1-1.0.0.dar
+  - daml/vendor/splice-api-token-transfer-instruction-v1-1.0.0.dar
+  # test-only: concrete Amulet impl + mock registry harness (LF 2.2)
+  - daml/vendor/splice-amulet-0.1.14.dar
+  - daml/vendor/splice-token-standard-test-1.0.6.dar
 build-options:
-  - --target=2.1
+  - --target=2.2

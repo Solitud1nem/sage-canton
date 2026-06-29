@@ -1,0 +1,150 @@
+-- | M3 settlement tests — REAL token movement via the CIP-0056 Allocation/DvP flow.
+--
+-- These exercise TaskEscrow against the Amulet (Canton Coin) registry using the
+-- `splice-token-standard-test` mock registry, entirely in Daml Script (no LocalNet
+-- needed). They prove that on settlement, funds actually move requester -> worker —
+-- not just a status flip. Mirrors cn-quickstart's `licensing-tests` TestLicense flow.
+--
+-- The instrument here is Amulet; swapping to USDCx is a config change (ADR-0017).
+
+module Tests.TestSettlement where
+
+import Daml.Script hiding (Created)
+import DA.Assert ((===))
+import DA.List (head, sortOn)
+import DA.Time (addRelTime, seconds)
+
+import Splice.Api.Token.MetadataV1 (ExtraArgs(..), emptyMetadata)
+import Splice.Api.Token.AllocationV1 (Allocation, AllocationView)
+import Splice.Api.Token.AllocationInstructionV1 (AllocationFactory_Allocate(..))
+
+import Splice.AmuletAllocation (AmuletAllocation)
+
+import Splice.Testing.Registries.AmuletRegistry qualified as AmuletRegistry
+import Splice.Testing.TokenStandard.RegistryApi qualified as RegistryApi
+import Splice.Testing.TokenStandard.WalletClient qualified as WalletClient
+import Splice.Testing.Utils (emptyExtraArgs, submitWithDisclosures', queryDisclosure')
+
+import TaskEscrow
+
+-- Find the funded allocation that backs a given escrow, by its settlement reference id.
+allocationForTask : Party -> Text -> Script (ContractId Allocation, AllocationView)
+allocationForTask p refId = do
+  allocs <- queryInterface @Allocation p
+  let matching =
+        [ (cid, a)
+        | (cid, Some a) <- allocs
+        , a.allocation.settlement.settlementRef.id == refId
+        ]
+  length matching === 1
+  pure (head (sortOn (\(_, a) -> a.allocation.settlement.settlementRef.id) matching))
+
+-- Happy path: requester taps Amulet, funds the escrow's allocation, provider settles on
+-- completion -> worker is actually paid in Canton Coin and the escrow becomes Paid.
+testSettlementPaysWorker : Script ()
+testSettlementPaysWorker = do
+  registry <- AmuletRegistry.initialize AmuletRegistry.defaultAmuletRegistryConfig
+  provider  <- allocateParty "provider"
+  requester <- allocateParty "requester"
+  worker    <- allocateParty "worker"
+  arbiter   <- allocateParty "arbiter"
+
+  -- provider is the settlement executor / featured app; requester taps test Amulet
+  AmuletRegistry.featureApp registry provider
+  _ <- AmuletRegistry.tapFaucet registry requester 1000.0
+
+  now <- getTime
+  let inst   = registry.instrumentId          -- InstrumentId { admin = registry.dso, id = "Amulet" }
+      reward = 100.0
+      refId  = "settle-happy-001"
+
+  -- 1. create the escrow and drive it to Completed
+  escrowCid <- submit (actAs [provider, requester]) do
+    createCmd TaskEscrow with
+      provider; requester; worker; arbiter
+      taskRef = refId; amount = reward; instrumentId = inst
+      status = Created; createdAt = now
+      deadline = now `addRelTime` seconds 3600; resultRef = None
+  acceptedCid  <- submit worker do exerciseCmd escrowCid Accept
+  completedCid <- submit worker do exerciseCmd acceptedCid Complete with completionRef = "artifact-1"
+
+  -- 2. requester's wallet sees the escrow's AllocationRequest and funds it (locks Amulet)
+  [reqAlloc] <- WalletClient.listRequestedAllocations requester inst
+  reqAlloc.transferLeg.amount    === reward
+  reqAlloc.transferLeg.sender    === requester
+  reqAlloc.transferLeg.receiver  === worker
+  holdingCids <- WalletClient.listHoldingCids requester inst
+  enriched <- RegistryApi.getAllocationFactory registry AllocationFactory_Allocate with
+    expectedAdmin    = registry.dso
+    allocation       = reqAlloc
+    requestedAt      = now
+    inputHoldingCids = holdingCids
+    extraArgs        = emptyExtraArgs
+  submitWithDisclosures' requester enriched.disclosures $
+    exerciseCmd enriched.factoryCid enriched.arg
+
+  -- 3. provider settles: atomically execute the allocation transfer + mark escrow Paid
+  (allocCid, _) <- allocationForTask provider refId
+  ctx <- RegistryApi.getAllocation_TransferContext registry allocCid emptyMetadata
+  -- the Amulet allocation is disclosed to dso/requester/provider but not the worker;
+  -- disclose it (as provider, who sees it) so the worker can fetch it when claiming.
+  allocDisc <- queryDisclosure' provider (coerceContractId allocCid : ContractId AmuletAllocation)
+  paidCid <- submitWithDisclosures' worker (ctx.disclosures <> allocDisc) $
+    exerciseCmd completedCid SettlePayment with
+      allocationCid = allocCid
+      extraArgs = ExtraArgs with context = ctx.choiceContext, meta = emptyMetadata
+
+  -- 4. the worker really received the Canton Coin and the escrow is Paid
+  Some task <- queryContractId provider paidCid
+  task.status === Paid
+  WalletClient.checkBalanceApprox worker inst reward
+  pure ()
+
+-- Refund path: a funded-but-unaccepted task is reclaimed — the requester withdraws the
+-- locked allocation and gets their Amulet back; the escrow becomes Refunded.
+testSettlementRefunds : Script ()
+testSettlementRefunds = do
+  registry <- AmuletRegistry.initialize AmuletRegistry.defaultAmuletRegistryConfig
+  provider  <- allocateParty "provider"
+  requester <- allocateParty "requester"
+  worker    <- allocateParty "worker"
+  arbiter   <- allocateParty "arbiter"
+
+  _ <- AmuletRegistry.tapFaucet registry requester 1000.0
+  now <- getTime
+  let inst   = registry.instrumentId
+      reward = 100.0
+      refId  = "settle-refund-001"
+
+  escrowCid <- submit (actAs [provider, requester]) do
+    createCmd TaskEscrow with
+      provider; requester; worker; arbiter
+      taskRef = refId; amount = reward; instrumentId = inst
+      status = Created; createdAt = now
+      deadline = now `addRelTime` seconds 3600; resultRef = None
+
+  -- requester funds it while still in Created
+  [reqAlloc] <- WalletClient.listRequestedAllocations requester inst
+  holdingCids <- WalletClient.listHoldingCids requester inst
+  enriched <- RegistryApi.getAllocationFactory registry AllocationFactory_Allocate with
+    expectedAdmin    = registry.dso
+    allocation       = reqAlloc
+    requestedAt      = now
+    inputHoldingCids = holdingCids
+    extraArgs        = emptyExtraArgs
+  submitWithDisclosures' requester enriched.disclosures $
+    exerciseCmd enriched.factoryCid enriched.arg
+
+  -- requester reclaims: withdraw the allocation + escrow -> Refunded
+  (allocCid, _) <- allocationForTask provider refId
+  ctx <- RegistryApi.getAllocation_WithdrawContext registry allocCid emptyMetadata
+  refundedCid <- submitWithDisclosures' requester ctx.disclosures $
+    exerciseCmd escrowCid SettleRefund with
+      allocationCid = allocCid
+      extraArgs = ExtraArgs with context = ctx.choiceContext, meta = emptyMetadata
+
+  Some task <- queryContractId provider refundedCid
+  task.status === Refunded
+  -- funds are back with the requester (minus negligible fees)
+  WalletClient.checkBalanceApprox requester inst 1000.0
+  pure ()
