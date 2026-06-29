@@ -76,10 +76,25 @@ config switch.
 - Follow-up: split Script tests into their own package so the production DAR drops the
   amulet/token-standard-test/daml-script bloat (see `daml.yaml` note).
 
-## M4 — Backend + JSON Ledger API
-- TS backend (`dpm codegen-js` bindings) over the JSON Ledger API; PQS for reads.
-- Idempotent, PQS-polled automation: auto-Expire overdue tasks, auto-settle approved.
-- External-party signing (`prepare`/`execute`) for self-custodial agents.
+## M4 — Backend + JSON Ledger API 🟢 (core done, 2026-06-29)
+TypeScript backend in `backend/` — typed orchestration over the **v2** JSON Ledger API +
+the Amulet registry. Proven end-to-end against the live LocalNet (worker paid real Amulet
+through the REST `settle` endpoint).
+- [x] Typed v2 client (`src/ledger.ts`), Amulet registry client (`src/registry.ts`, via
+  `node:http` because fetch drops the `Host: scan.localhost` header), wallet/tap
+  (`src/wallet.ts`), and `EscrowService` (lifecycle + fund→settle) — `src/escrow.ts`.
+- [x] **REST API** (`src/server.ts`, zero-dep `node:http`): create / accept / complete /
+  approve / settle / expire / list + `/admin/tap`. Full lifecycle incl. real-token settle
+  driven over HTTP and verified.
+- [x] **Idempotent automation** (`src/automation.ts`): polls the ACS, auto-Expires overdue
+  tasks (verified), optional auto-settle; self-guards against overlap; idempotent by
+  re-reading current state each tick.
+- Decision: speak v2 JSON API directly with hand-written types (verified) rather than
+  `dpm codegen-js`, whose `@daml/types` decoders target the deprecated **v1** API. See
+  `backend/README.md`.
+- [ ] PQS read model instead of ACS polling (scales; poller is fine for the demo).
+- [ ] **External-party signing** (`prepare`/`execute`) so agents self-custody instead of the
+  backend holding `CanActAs` — also unlocks the cross-participant privacy story (M2 note).
 
 ## M5 — Frontend + agent orchestration
 - Reuse the Sage product shell (re-pointed to the backend, not viem).

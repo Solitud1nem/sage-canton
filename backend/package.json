@@ -1,0 +1,19 @@
+{
+  "name": "sage-canton-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "sage-canton backend — typed orchestration over the v2 JSON Ledger API + Amulet registry",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "demo": "tsx src/demo.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
