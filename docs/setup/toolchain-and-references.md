@@ -254,6 +254,33 @@ call until the fresh allocation is visible.
 - Install doc: https://docs.digitalasset.com/build/3.4/quickstart/download/cnqs-installation.html
 - Reference app using the token standard: `quickstart/daml/licensing/` (see §3).
 
+### Cross-participant privacy runbook (VERIFIED 2026-06-29)
+
+Stakeholders on DIFFERENT participants — requester/provider on **App User** (:2975), worker
+on **App Provider** (:3975) — same global synchronizer. Implemented in
+`scripts/cross_participant_demo.py`; design in ADR-0018. The moves:
+
+1. **Allocate each party on its HOME participant** (`POST :2975|:3975 /v2/parties`) and grant
+   that participant's `ledger-api-user` `CanActAs` for its own parties. Party ids carry the
+   home participant's namespace; cross-participant references are by global party id.
+2. **Create on App User** (`actAs=[provider,requester]`, the signatories) with `worker` (an
+   App-Provider party) as observer. Canton replicates the contract to App Provider because the
+   worker is a stakeholder there.
+3. **Check visibility** via `/v2/state/active-contracts` on each participant: stakeholders see
+   1, outsiders on either participant see 0.
+4. **Worker exercises `Accept` from App Provider** (`actAs=[worker]` on :3975) — its home
+   participant authorizes; App User never holds the worker's `CanActAs`. The state change
+   propagates back (App User provider sees `Accepted`).
+
+Gotchas: (a) the package must be **vetted on BOTH** participants AND they must share a
+synchronizer, else create fails `NO_SYNCHRONIZER_FOR_SUBMISSION`. (b) On a dev node whose
+`sage-canton` package lineage is already tainted on each participant (a prior, different
+v0.1.x vetted → smart-upgrade rejects the clean successor; see the M3/test-split notes), build
+the identical contract under a **fresh name** (`sage-canton-xc`) so it vets cleanly on both,
+and pass its id via `PACKAGE_ID`. On a fresh participant the production package vets directly.
+(c) No external-party signing needed for this authority model — that's the self-custody layer
+(`/v2/interactive-submission/prepare`+`execute`, endpoints confirmed present), ADR-0018 §2.
+
 ---
 
 ## 5. Canonical doc index (bookmark these)

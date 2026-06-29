@@ -111,6 +111,11 @@ A complete vertical slice, proven on a live Canton node:
   on a live cn-quickstart node (USDCx is a config switch — [ADR-0017](docs/adr/0017-settlement-via-cip0056-token-standard.md)).
 - **Privacy, demonstrated** — a non-stakeholder party sees **0** escrows on the live ledger
   (visible in the UI's perspective switcher).
+- **Cross-participant privacy** — the headline differentiator, proven across TWO participants:
+  requester/provider on App User, worker on App Provider (same synchronizer). The escrow
+  replicates only to its stakeholders' participants; outsiders on either see **0**, and the
+  worker drives its choices from its own participant (no shared custody).
+  `scripts/cross_participant_demo.py`; design in [ADR-0018](docs/adr/0018-cross-participant-privacy-and-external-signing.md).
 - **TypeScript backend** — typed v2 JSON Ledger API + Amulet registry clients, REST API,
   idempotent automation (auto-expire / auto-settle).
 - **Demo UI** — fund → create → run agent → settle, with the worker's balance rising.
