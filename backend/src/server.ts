@@ -11,6 +11,7 @@ import { RegistryClient } from './registry.js';
 import { EscrowService } from './escrow.js';
 import { Automation } from './automation.js';
 import { tap, walletParty } from './wallet.js';
+import { currentUserId } from './jwt.js';
 import { AgentRunner } from './agent/runner.js';
 import { llmMode } from './agent/llm.js';
 import type { InstrumentId, Party } from './types.js';
@@ -81,7 +82,7 @@ route('POST', '/admin/provision', async () => {
     ledger.allocateParty(`provider-${sfx}`), ledger.allocateParty(`worker-${sfx}`),
     ledger.allocateParty(`arbiter-${sfx}`), ledger.allocateParty(`outsider-${sfx}`),
   ]);
-  await ledger.grantActAs(config.adminUser, [requester, provider, worker, arbiter, outsider]);
+  await ledger.grantActAs(await currentUserId(), [requester, provider, worker, arbiter, outsider]);
   await tap('1000.0');
   return { requester, provider, worker, arbiter, outsider };
 });
