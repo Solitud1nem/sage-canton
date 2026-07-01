@@ -2,7 +2,9 @@
 const API = location.origin; // backend serves this page, so same origin
 const $ = (id) => document.getElementById(id);
 const short = (p) => (p ? p.split('::')[0] + '::' + p.split('::')[1]?.slice(0, 6) + '…' : '');
-const GREEK = ['α', 'β', 'γ', 'δ', 'ε'];
+// The MVP provisions a pool of interchangeable research agents (a real Sage would pull named,
+// capability-tagged agents from the AgentRegistry). Name them plainly rather than by symbol.
+const agentName = (i) => `Agent ${i + 1}`;
 
 let session = null;            // { requester, provider, worker, workers[], arbiter, outsider }
 let perspective = 'requester';
@@ -16,7 +18,7 @@ const plans = {};              // parent taskRef -> editable plan { live, items:
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task-' + Math.random().toString(36).slice(2, 7);
 const esc = (s) => String(s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const agents = () => session?.workers?.length ? session.workers : [session?.worker].filter(Boolean);
-const agentLabel = (p) => { const i = agents().indexOf(p); return i >= 0 ? `agent ${GREEK[i] || i + 1}` : short(p); };
+const agentLabel = (p) => { const i = agents().indexOf(p); return i >= 0 ? agentName(i) : short(p); };
 
 async function api(method, path, body) {
   const res = await fetch(API + path, {
@@ -71,7 +73,7 @@ function renderParties() {
   $('parties').classList.remove('hidden');
   const pill = (role, pid) => `<div class="pill"><div class="role">${role}</div><div class="pid">${short(pid)}</div></div>`;
   const base = ['requester', 'provider', 'arbiter', 'outsider'].map((r) => pill(r, session[r]));
-  const wk = agents().map((w, i) => pill(`agent ${GREEK[i] || i + 1}`, w));
+  const wk = agents().map((w, i) => pill(agentName(i), w));
   $('parties').innerHTML = [...base, ...wk].join('');
   $('perspective').innerHTML = ['requester', 'worker', 'provider', 'outsider'].map((r) =>
     `<button class="tiny ${r === perspective ? 'active' : ''}" data-p="${r}">${r === 'worker' ? 'agents' : r}</button>`).join('');
@@ -208,7 +210,7 @@ async function runPlan(t) {
 }
 
 function workerOptions(sel) {
-  return agents().map((w, i) => `<option value="${w}" ${w === sel ? 'selected' : ''}>agent ${GREEK[i] || i + 1}</option>`).join('');
+  return agents().map((w, i) => `<option value="${w}" ${w === sel ? 'selected' : ''}>${agentName(i)}</option>`).join('');
 }
 
 // Editable plan the requester reviews before paying: per sub-task title, brief, assigned agent, reward.

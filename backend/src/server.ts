@@ -95,8 +95,8 @@ route('POST', '/admin/provision', async () => {
   const requester = await walletParty();
   // A small pool of worker agents so a decomposition plan can assign sub-tasks to different ones.
   const [provider, workerA, workerB, workerC, arbiter, outsider] = await Promise.all([
-    ledger.allocateParty(`provider-${sfx}`), ledger.allocateParty(`agent-alpha-${sfx}`),
-    ledger.allocateParty(`agent-beta-${sfx}`), ledger.allocateParty(`agent-gamma-${sfx}`),
+    ledger.allocateParty(`provider-${sfx}`), ledger.allocateParty(`agent-1-${sfx}`),
+    ledger.allocateParty(`agent-2-${sfx}`), ledger.allocateParty(`agent-3-${sfx}`),
     ledger.allocateParty(`arbiter-${sfx}`), ledger.allocateParty(`outsider-${sfx}`),
   ]);
   const workers = [workerA, workerB, workerC];
