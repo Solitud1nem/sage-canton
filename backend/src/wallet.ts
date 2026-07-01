@@ -1,11 +1,11 @@
 // Splice validator wallet API — tap test Amulet + resolve the wallet party.
 import { config } from './config.js';
-import { walletToken } from './jwt.js';
+import { getWalletToken } from './jwt.js';
 
 async function wallet(method: string, path: string, body?: unknown): Promise<any> {
   const res = await fetch(`${config.validatorApi}${path}`, {
     method,
-    headers: { Authorization: `Bearer ${walletToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { Authorization: `Bearer ${await getWalletToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();

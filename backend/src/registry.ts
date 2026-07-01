@@ -5,6 +5,7 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { config } from './config.js';
+import { getAdminToken } from './jwt.js';
 import type { DisclosedContract } from './types.js';
 
 export interface ChoiceContextResult {
@@ -16,7 +17,17 @@ export interface ChoiceContextResult {
 const pickDisclosed = (raw: any[]): DisclosedContract[] =>
   raw.map((d) => ({ templateId: d.templateId, contractId: d.contractId, createdEventBlob: d.createdEventBlob, synchronizerId: d.synchronizerId }));
 
-function request(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
+async function request(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
+  // Seaport (no registryHost) → the validator scan-proxy over HTTPS with our Bearer token.
+  if (!config.registryHost) {
+    const headers: Record<string, string> = { Authorization: `Bearer ${await getAdminToken()}` };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const res = await fetch(`${config.registry}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await res.text();
+    let json: any; try { json = text ? JSON.parse(text) : undefined; } catch { json = text; }
+    return { status: res.status, json };
+  }
+  // LocalNet → SV nginx routed by a `Host: scan.localhost` header (fetch drops custom Host, so node:http).
   const u = new URL(`${config.registry}${path}`);
   const data = body === undefined ? undefined : JSON.stringify(body);
   const headers: Record<string, string> = { Host: config.registryHost };

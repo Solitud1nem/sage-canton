@@ -65,12 +65,18 @@ const localnet: Config = {
   parties,
 };
 
+// The 5n sandbox validator app (wallet + token-standard registry via its scan-proxy) is served
+// on the wallet host; both accept our m2m OIDC token. `validatorApi` is the HOST ROOT (wallet.ts
+// appends `/api/validator/v0/wallet/...`); the registry base adds the scan-proxy path, under
+// which the CIP-0056 `/registry/...` endpoints live. Verified 2026-07-01.
+const SEAPORT_HOST = env('SEAPORT_VALIDATOR_URL', 'https://wallet.validator.devnet.sandbox.fivenorth.io');
+
 const seaport: Config = {
   target: 'seaport-devnet',
   ledgerApi: env('SEAPORT_LEDGER_URL', 'https://ledger-api.validator.devnet.sandbox.fivenorth.io'),
-  // No Splice wallet / scan.localhost proxy on the shared validator; guarded at call sites.
-  validatorApi: env('VALIDATOR_API', ''),
-  registry: env('REGISTRY_API', ''),
+  validatorApi: env('VALIDATOR_API', SEAPORT_HOST),
+  registry: env('REGISTRY_API', `${SEAPORT_HOST}/api/validator/v0/scan-proxy`),
+  // No `scan.localhost` Host hack on DevNet — real HTTPS host + Bearer auth (empty ⇒ no Host header).
   registryHost: env('REGISTRY_HOST', ''),
   auth: {
     mode: 'oidc',
@@ -94,5 +100,9 @@ export const config: Config = target === 'seaport-devnet' ? seaport : localnet;
 // CIP-0056 token-standard package ids (allocation-instruction interface) — stable 1.0.0.
 export const ALLOCATION_INSTRUCTION_PKG =
   '275064aacfe99cea72ee0c80563936129563776f67415ef9f13e4297eecbc520';
+// Holding interface id. 3.5.6 ACS filters want the package-NAME form (`#name:Mod:Ent`); LocalNet
+// used the package-id form. Pick per target so both ledgers accept the active-contracts filter.
 export const HOLDING_INTERFACE =
-  '718a0f77e505a8de22f188bd4c87fe74101274e9d4cb1bfac7d09aec7158d35b:Splice.Api.Token.HoldingV1:Holding';
+  config.target === 'seaport-devnet'
+    ? '#splice-api-token-holding-v1:Splice.Api.Token.HoldingV1:Holding'
+    : '718a0f77e505a8de22f188bd4c87fe74101274e9d4cb1bfac7d09aec7158d35b:Splice.Api.Token.HoldingV1:Holding';

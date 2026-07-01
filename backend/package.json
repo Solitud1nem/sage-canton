@@ -13,7 +13,9 @@
     "agent-demo": "tsx src/agent-demo.ts",
     "smoke:seaport": "tsx src/smoke-seaport.ts",
     "probe:seaport": "tsx src/probe-seaport.ts",
-    "e2e:seaport": "tsx src/seaport-e2e.ts"
+    "probe:settlement": "tsx src/probe-settlement.ts",
+    "e2e:seaport": "tsx src/seaport-e2e.ts",
+    "settle:seaport": "tsx src/seaport-settle.ts"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
