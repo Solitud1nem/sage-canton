@@ -14,6 +14,7 @@ export interface CreateTaskParams {
   provider: Party; requester: Party; worker: Party; arbiter: Party;
   taskRef: string; amount: string; instrumentId: InstrumentId;
   deadlineSeconds?: number; // default 1h
+  parentRef?: string | null; // set for a decomposition sub-task (links it to its parent)
 }
 
 export class EscrowService {
@@ -42,7 +43,7 @@ export class EscrowService {
     const args: TaskEscrow = {
       provider: p.provider, requester: p.requester, worker: p.worker, arbiter: p.arbiter,
       taskRef: p.taskRef, amount: p.amount, instrumentId: p.instrumentId,
-      status: 'Created', createdAt, deadline, resultRef: null,
+      status: 'Created', createdAt, deadline, resultRef: null, parentRef: p.parentRef ?? null,
     };
     const tx = await this.ledger.submit([{ CreateCommand: { templateId: this.te, createArguments: args as unknown as Record<string, unknown> } }], [p.provider, p.requester]);
     return this.created(tx.events && createdBySuffix(tx, TE_SUFFIX)!);

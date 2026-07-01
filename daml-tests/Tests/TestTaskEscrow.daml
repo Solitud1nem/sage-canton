@@ -49,6 +49,7 @@ createTask p = do
       createdAt = now
       deadline  = addRelTime now (seconds 3600)
       resultRef = None
+      parentRef = None
 
 -- Happy path: Created -> Accepted -> Completed -> Paid.
 testHappyPath : Script ()

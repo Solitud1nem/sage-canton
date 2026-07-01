@@ -65,7 +65,7 @@ testSettlementPaysWorker = do
       provider; requester; worker; arbiter
       taskRef = refId; amount = reward; instrumentId = inst
       status = Created; createdAt = now
-      deadline = now `addRelTime` seconds 3600; resultRef = None
+      deadline = now `addRelTime` seconds 3600; resultRef = None; parentRef = None
   acceptedCid  <- submit worker do exerciseCmd escrowCid Accept
   completedCid <- submit worker do exerciseCmd acceptedCid Complete with completionRef = "artifact-1"
 
@@ -122,7 +122,7 @@ testSettlementRefunds = do
       provider; requester; worker; arbiter
       taskRef = refId; amount = reward; instrumentId = inst
       status = Created; createdAt = now
-      deadline = now `addRelTime` seconds 3600; resultRef = None
+      deadline = now `addRelTime` seconds 3600; resultRef = None; parentRef = None
 
   -- requester funds it while still in Created
   [reqAlloc] <- WalletClient.listRequestedAllocations requester inst
@@ -173,7 +173,7 @@ testDisputeSettlementRefunds = do
       provider; requester; worker; arbiter
       taskRef = refId; amount = reward; instrumentId = inst
       status = Created; createdAt = now
-      deadline = now `addRelTime` seconds 3600; resultRef = None
+      deadline = now `addRelTime` seconds 3600; resultRef = None; parentRef = None
   acceptedCid  <- submit worker do exerciseCmd escrowCid Accept
   completedCid <- submit worker do exerciseCmd acceptedCid Complete with completionRef = "artifact-1"
 
@@ -233,7 +233,7 @@ testDisputeSettlementPaysWorker = do
       provider; requester; worker; arbiter
       taskRef = refId; amount = reward; instrumentId = inst
       status = Created; createdAt = now
-      deadline = now `addRelTime` seconds 3600; resultRef = None
+      deadline = now `addRelTime` seconds 3600; resultRef = None; parentRef = None
   acceptedCid  <- submit worker do exerciseCmd escrowCid Accept
   completedCid <- submit worker do exerciseCmd acceptedCid Complete with completionRef = "artifact-1"
 

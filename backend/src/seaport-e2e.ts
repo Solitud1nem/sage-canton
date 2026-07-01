@@ -15,7 +15,7 @@ import { currentUserId } from './jwt.js';
 if (config.target !== 'seaport-devnet') { console.error('set LEDGER_TARGET=seaport-devnet in backend/.env'); process.exit(2); }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const darPath = join(here, '..', '..', '.daml', 'dist', 'sage-canton-0.1.4.dar');
+const darPath = join(here, '..', '..', '.daml', 'dist', 'sage-canton-0.2.0.dar');
 
 const ledger = new LedgerClient();
 // EscrowService uses a RegistryClient only in settlement paths; the lifecycle choices we
@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   // 1. upload the prod DAR (idempotent: KNOWN_PACKAGE_VERSION is tolerated)
   const dar = readFileSync(darPath);
   await ledger.uploadDar(dar);
-  console.log('DAR uploaded  ', `sage-canton-0.1.4 (${(dar.length / 1024).toFixed(0)} KiB), pkg ${config.packageId.slice(0, 16)}…`);
+  console.log('DAR uploaded  ', `sage-canton-0.2.0 (${(dar.length / 1024).toFixed(0)} KiB), pkg ${config.packageId.slice(0, 16)}…`);
 
   // 2. allocate parties + grant the m2m user CanActAs for them
   const sfx = Math.random().toString(36).slice(2, 8);

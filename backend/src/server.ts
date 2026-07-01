@@ -33,7 +33,7 @@ function route(method: string, path: string, fn: Handler): void {
 const amulet = (i?: InstrumentId): InstrumentId => i ?? { admin: dso, id: 'Amulet' };
 const balance = async (party: Party): Promise<number> => (await ledger.amuletHoldings(party)).reduce((s, h) => s + h.amount, 0);
 
-route('GET', '/health', async () => ({ ok: true, packageId: config.packageId, dso, llm: llmMode() }));
+route('GET', '/health', async () => ({ ok: true, target: config.target, packageId: config.packageId, dso, llm: llmMode() }));
 route('GET', '/balance', async (_p, _b, url) => ({ amulet: await balance(url.searchParams.get('party') ?? '') }));
 route('GET', '/tasks', async (_p, _b, url) => {
   const party = url.searchParams.get('party');
@@ -72,6 +72,12 @@ route('POST', '/agent/run/:cid', async (p, b) => {
   const esc = await svc.get(b.provider, p.cid!);
   if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
   return runner.run(esc, b.brief);
+});
+// Dynamic decomposition: split the parent task into child escrows, run + settle each, roll up.
+route('POST', '/agent/decompose/:cid', async (p, b) => {
+  const esc = await svc.get(b.provider, p.cid!);
+  if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
+  return runner.runDecomposed(esc, b.brief);
 });
 // Demo provisioning: requester = the wallet party; allocate the other roles + an outsider
 // (no stake) and grant the backend CanActAs so it can drive every perspective.

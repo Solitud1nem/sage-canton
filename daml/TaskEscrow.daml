@@ -60,6 +60,10 @@ template TaskEscrow
     createdAt    : Time            -- ^ ledger time at funding; the settlement `requestedAt`
     deadline     : Time            -- ^ accept/complete deadline -> Expired; the allocation `allocateBefore`
     resultRef    : Optional Text   -- ^ worker's completion artifact id / hash
+    parentRef    : Optional Text   -- ^ if this is a decomposition sub-task, the parent task's `taskRef`
+                                   --   (None for a top-level / standalone task). Links child escrows
+                                   --   to their orchestrating parent ON-LEDGER, so each sub-task keeps
+                                   --   its own private stakeholder set + independent settlement.
   where
     signatory provider, requester
     observer worker, arbiter

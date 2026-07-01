@@ -59,7 +59,7 @@ const localnet: Config = {
   adminUser: env('ADMIN_USER', 'ledger-api-user'),
   walletUser: env('WALLET_USER', 'app-user'),
   // sage-canton 0.1.4 main package (rebuild + update if the contract changes; or set via env)
-  packageId: env('PACKAGE_ID', '46b3e0f3c32331a880b566250dd33036d5b33ede0b0c80b1f672aa94f2296412'),
+  packageId: env('PACKAGE_ID', '56c051ce4524277126bbaa0191a754a18e2e50e7dd17454ab8ae78caad584d18'),
   packageName: env('PACKAGE_NAME', 'sage-canton'),
   port: Number(env('PORT', '8088')),
   parties,
@@ -89,7 +89,7 @@ const seaport: Config = {
   // The m2m user acts as our parties; override if the shared validator uses a different user id.
   adminUser: env('ADMIN_USER', 'validator-devnet-m2m'),
   walletUser: env('WALLET_USER', ''),
-  packageId: env('PACKAGE_ID', '46b3e0f3c32331a880b566250dd33036d5b33ede0b0c80b1f672aa94f2296412'),
+  packageId: env('PACKAGE_ID', '56c051ce4524277126bbaa0191a754a18e2e50e7dd17454ab8ae78caad584d18'),
   packageName: env('PACKAGE_NAME', 'sage-canton'),
   port: Number(env('PORT', '8088')),
   parties,
