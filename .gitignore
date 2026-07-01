@@ -18,6 +18,9 @@ dist/
 # Env / secrets — never commit keys, party tokens, JWTs
 .env
 .env.*
+# ...but DO commit the .env.example template (names only, no secrets)
+!.env.example
+!**/.env.example
 *.jwt
 secrets/
 

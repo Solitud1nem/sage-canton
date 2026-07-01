@@ -10,7 +10,10 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "demo": "tsx src/demo.ts",
-    "agent-demo": "tsx src/agent-demo.ts"
+    "agent-demo": "tsx src/agent-demo.ts",
+    "smoke:seaport": "tsx src/smoke-seaport.ts",
+    "probe:seaport": "tsx src/probe-seaport.ts",
+    "e2e:seaport": "tsx src/seaport-e2e.ts"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

@@ -1,5 +1,5 @@
 // Core escrow orchestration: TaskEscrow lifecycle + CIP-0056 settlement over the ledger.
-import { ALLOCATION_INSTRUCTION_PKG } from './config.js';
+import { ALLOCATION_INSTRUCTION_PKG, config } from './config.js';
 import { LedgerClient, createdBySuffix, type Command, type CreatedEvent } from './ledger.js';
 import { RegistryClient } from './registry.js';
 import type { ContractId, EscrowContract, InstrumentId, Party, TaskEscrow } from './types.js';
@@ -17,13 +17,17 @@ export interface CreateTaskParams {
 }
 
 export class EscrowService {
-  private readonly te: string;
+  private readonly te: string;       // package-id qualified — for create/exercise commands
+  private readonly teQuery: string;  // package-name qualified — for ACS/query template filters
   constructor(
     packageId: string,
     private readonly ledger = new LedgerClient(),
     private readonly registry = new RegistryClient(),
   ) {
     this.te = `${packageId}:TaskEscrow:TaskEscrow`;
+    // The v2 active-contracts filter expects a package-NAME identifier (`#name:Mod:Ent`),
+    // not a package id — and package-name matching also spans DAR upgrades.
+    this.teQuery = `#${config.packageName}:TaskEscrow:TaskEscrow`;
   }
 
   private exercise(cid: ContractId, choice: string, arg: Record<string, unknown> = {}): Command {
@@ -72,7 +76,7 @@ export class EscrowService {
 
   /** All TaskEscrows visible to a party. */
   async list(party: Party): Promise<EscrowContract[]> {
-    const evs = await this.ledger.activeContracts(party, { templateId: this.te });
+    const evs = await this.ledger.activeContracts(party, { templateId: this.teQuery });
     return evs.filter((ce) => ce.templateId.endsWith(TE_SUFFIX)).map((ce) => ({ contractId: ce.contractId, payload: ce.createArgument as unknown as TaskEscrow }));
   }
   async get(party: Party, cid: ContractId): Promise<EscrowContract | undefined> {

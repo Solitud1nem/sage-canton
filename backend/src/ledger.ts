@@ -1,6 +1,6 @@
 // Thin typed client for the Canton v2 JSON Ledger API.
 import { config, HOLDING_INTERFACE } from './config.js';
-import { adminToken } from './jwt.js';
+import { getAdminToken, clearToken } from './jwt.js';
 import type { ContractId, DisclosedContract, Party } from './types.js';
 
 export interface CreatedEvent {
@@ -18,18 +18,27 @@ export type Command =
   | { ExerciseCommand: { templateId: string; contractId: ContractId; choice: string; choiceArgument: Record<string, unknown> } };
 
 async function http(method: string, url: string, body?: unknown, opts?: { token?: string; host?: string; raw?: Buffer }): Promise<{ status: number; json: any }> {
-  const headers: Record<string, string> = {};
-  const token = opts?.token ?? adminToken();
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  if (opts?.host) headers['Host'] = opts.host;
-  let payload: string | Uint8Array | undefined;
-  if (opts?.raw) { headers['Content-Type'] = 'application/octet-stream'; payload = opts.raw; }
-  else if (body !== undefined) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
-  const res = await fetch(url, { method, headers, body: payload });
-  const text = await res.text();
-  let json: any = undefined;
-  try { json = text ? JSON.parse(text) : undefined; } catch { json = text; }
-  return { status: res.status, json };
+  const doFetch = async (token: string | undefined) => {
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (opts?.host) headers['Host'] = opts.host;
+    let payload: string | Uint8Array | undefined;
+    if (opts?.raw) { headers['Content-Type'] = 'application/octet-stream'; payload = opts.raw; }
+    else if (body !== undefined) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+    const res = await fetch(url, { method, headers, body: payload });
+    const text = await res.text();
+    let json: any = undefined;
+    try { json = text ? JSON.parse(text) : undefined; } catch { json = text; }
+    return { status: res.status, json };
+  };
+
+  // An explicit opts.token is caller-managed; an auto token can be refreshed on 401
+  // (an 8h Seaport OIDC token may expire mid-session — clear the cache and retry once).
+  if (opts?.token !== undefined) return doFetch(opts.token);
+  const res = await doFetch(await getAdminToken());
+  if (res.status !== 401) return res;
+  clearToken();
+  return doFetch(await getAdminToken());
 }
 
 export class LedgerClient {
