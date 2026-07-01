@@ -83,3 +83,39 @@ button.tiny { padding: 6px 11px; font-size: 13px; }
 
 .form label.grow { flex: 1 1 320px; }
 .form label.grow input { width: 100%; min-width: 0; }
+
+/* Agent result preview */
+.report { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.report .rhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rout { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid; }
+.rout.paid { color: var(--accent); border-color: #12331f; background: #0e2417; }
+.rout.refunded { color: var(--red); border-color: #3a1c1c; background: #2a1212; }
+.rsrc { font-size: 12px; color: var(--muted); }
+.ranswer { margin-top: 10px; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px; }
+.rlabel { margin-top: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.rcites { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 5px; }
+.rcites li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-family: ui-monospace, monospace; }
+.rcites .ck { width: 16px; text-align: center; font-weight: 700; }
+.rcites li.ok .ck { color: var(--accent); }
+.rcites li.bad .ck { color: var(--red); }
+.rcites a { color: var(--blue); text-decoration: none; word-break: break-all; }
+.rcites a:hover { text-decoration: underline; }
+.rcites li.bad a { color: var(--red); }
+.rcites .st { color: var(--muted); }
+.rlog { margin-top: 11px; font-size: 12.5px; }
+.rlog summary { cursor: pointer; color: var(--muted); }
+.rlog ol { margin: 8px 0 0; padding-left: 20px; color: var(--muted); display: grid; gap: 3px; }
+
+/* Dynamic decomposition */
+.decomp { margin-top: 12px; border-top: 1px dashed var(--line); padding-top: 12px; }
+.subtask { margin-top: 12px; border-left: 2px solid var(--line); padding-left: 12px; }
+.sthead { display: flex; align-items: center; gap: 8px; }
+.sthead b { flex: 1; font-size: 13.5px; }
+.stnum { width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: var(--muted); }
+.streward { font-size: 12px; color: var(--accent); font-weight: 600; }
+.subtask .report { margin-top: 8px; padding-top: 8px; }
+.subchip { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; }
+.subchip .ref { font-family: ui-monospace, monospace; font-size: 12.5px; }

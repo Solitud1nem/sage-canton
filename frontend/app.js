@@ -7,6 +7,8 @@ let session = null;            // { requester, provider, worker, arbiter, outsid
 let perspective = 'requester';
 let pollTimer = null;
 const briefs = {};             // taskRef -> research brief (off-ledger, UI-side)
+const reports = {};            // taskRef -> last agent TaskReport (answer/citations/verdict/log)
+const decomps = {};            // parent taskRef -> last DecompositionReport (sub-task reports)
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task-' + Math.random().toString(36).slice(2, 7);
 
 async function api(method, path, body) {
@@ -31,7 +33,8 @@ async function health() {
   try {
     const h = await api('GET', '/health');
     $('net').classList.add('ok');
-    $('net').innerHTML = `<span class="dot"></span> LocalNet · DSO ${h.dso ? h.dso.slice(0, 14) + '…' : 'offline'}`;
+    const label = h.target === 'seaport-devnet' ? 'Seaport DevNet' : (h.target || 'LocalNet');
+    $('net').innerHTML = `<span class="dot"></span> ${label} · ${h.llm && h.llm.startsWith('live') ? '🧠 live LLM' : '📦 offline LLM'} · DSO ${h.dso ? h.dso.slice(0, 14) + '…' : 'offline'}`;
   } catch {
     $('net').innerHTML = `<span class="dot"></span> backend offline`;
   }
@@ -88,6 +91,7 @@ function actionsFor(t) {
   const acts = [];
   if (perspective === 'worker') {
     if (s === 'Created') acts.push(['🤖 Run agent', () => runAgent(t), true]);
+    if (s === 'Created' && !t.payload.parentRef) acts.push(['🧩 Decompose', () => runDecompose(t), true]);
     if (s === 'Created') acts.push(['Accept', () => act(t, 'accept', { worker: session.worker })]);
     if (s === 'Accepted') acts.push(['Complete', () => act(t, 'complete', { worker: session.worker, completionRef: 'result-' + t.payload.taskRef })]);
     if (s === 'Completed') acts.push(['💸 Settle (pay me)', () => act(t, 'settle', { provider: session.provider }), true]);
@@ -106,7 +110,12 @@ function renderTasks(tasks) {
       : `<div class="empty">No tasks yet from this perspective.</div>`;
     return;
   }
-  box.innerHTML = tasks.map((t) => {
+  // Nest decomposition children under their parent; only top-level tasks get their own card.
+  const kids = {};
+  tasks.forEach((t) => { if (t.payload.parentRef) (kids[t.payload.parentRef] ||= []).push(t); });
+  const tops = tasks.filter((t) => !t.payload.parentRef);
+
+  box.innerHTML = tops.map((t) => {
     const p = t.payload;
     const acts = actionsFor(t);
     return `<div class="task">
@@ -117,11 +126,13 @@ function renderTasks(tasks) {
       <div class="meta">requester ${short(p.requester)} → worker ${short(p.worker)}</div>
       ${acts.length ? `<div class="actions">${acts.map((a, i) =>
         `<button class="tiny ${a[2] ? 'primary' : ''}" data-cid="${t.contractId}" data-i="${i}">${a[0]}</button>`).join('')}</div>` : ''}
+      ${reportHtml(reports[p.taskRef])}
+      ${decompHtml(decomps[p.taskRef], kids[p.taskRef])}
     </div>`;
-  }).join('');
+  }).join('') || `<div class="empty">No tasks yet from this perspective.</div>`;
   box.querySelectorAll('button').forEach((b) => {
-    const t = tasks.find((x) => x.contractId === b.dataset.cid);
-    b.onclick = actionsFor(t)[Number(b.dataset.i)][1];
+    const t = tops.find((x) => x.contractId === b.dataset.cid);
+    if (t) b.onclick = actionsFor(t)[Number(b.dataset.i)][1];
   });
 }
 
@@ -163,6 +174,7 @@ async function runAgent(t) {
       provider: session.provider,
       brief: briefs[t.payload.taskRef],
     });
+    reports[t.payload.taskRef] = rep;
     toast(rep.outcome === 'paid'
       ? `✅ fact-check passed — worker paid (${rep.verdict.summary})`
       : `⛔ ${rep.verdict.summary} → disputed, no payout`, rep.outcome !== 'paid');
@@ -170,6 +182,69 @@ async function runAgent(t) {
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+// Dynamic decomposition: split the parent into child escrows, run + settle each, roll up.
+async function runDecompose(t) {
+  try {
+    toast('🧩 decomposing → running sub-tasks (real settlement each, ~30–60s)…');
+    const rep = await api('POST', `/agent/decompose/${encodeURIComponent(t.contractId)}`, {
+      provider: session.provider,
+      brief: briefs[t.payload.taskRef],
+    });
+    decomps[t.payload.taskRef] = rep;
+    const paid = rep.subtasks.filter((s) => s.outcome === 'paid').length;
+    toast(`🧩 ${rep.subtasks.length} sub-tasks · ${paid} paid · ${rep.paidTotal} CC to worker`, paid === 0);
+    await refresh();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// Render the agent's result under its task: answer, per-citation fact-check, pipeline log.
+function reportHtml(rep) {
+  if (!rep) return '';
+  const r = rep.result || {};
+  const checks = (rep.verdict && rep.verdict.checks) || [];
+  const cites = (r.citations || []).map((u) => {
+    const c = checks.find((x) => x.url === u) || {};
+    const st = c.status ? ` ${c.status}` : (c.error ? ` ${c.error}` : '');
+    return `<li class="${c.ok ? 'ok' : 'bad'}"><span class="ck">${c.ok ? '✓' : '✗'}</span><a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a><span class="st">${esc(st)}</span></li>`;
+  }).join('');
+  const log = (rep.log || []).map((l) => `<li>${esc(l)}</li>`).join('');
+  return `<div class="report ${rep.outcome}">
+    <div class="rhead">
+      <span class="rout ${rep.outcome}">${rep.outcome === 'paid' ? '✅ worker paid' : '⛔ no payout (disputed)'}</span>
+      <span class="rsrc">${r.live ? '🧠 live Claude' : '📦 offline stub'}</span>
+    </div>
+    <div class="ranswer">${esc(r.answer || '(no answer)')}</div>
+    ${cites ? `<div class="rlabel">Citations · paid fact-check</div><ul class="rcites">${cites}</ul>` : ''}
+    ${log ? `<details class="rlog"><summary>pipeline log (${rep.log.length} steps)</summary><ol>${log}</ol></details>` : ''}
+  </div>`;
+}
+
+// Render a decomposition: the sub-task plan + each child escrow's own report. Falls back to
+// bare status chips for on-ledger children with no in-memory report (e.g. after a reload).
+function decompHtml(rep, kids) {
+  if (rep) {
+    const paid = rep.subtasks.filter((s) => s.outcome === 'paid').length;
+    const subs = rep.subtasks.map((s, i) => {
+      const reward = (rep.decomposition.subtasks[i] || {}).reward || '';
+      return `<div class="subtask">
+        <div class="sthead"><span class="stnum">${i + 1}</span><b>${esc(s.title || s.taskRef)}</b><span class="streward">${esc(reward)} CC</span></div>
+        ${reportHtml(s)}
+      </div>`;
+    }).join('');
+    return `<div class="decomp">
+      <div class="rlabel">🧩 dynamic decomposition · ${rep.subtasks.length} on-ledger sub-escrows · ${paid} paid · ${esc(rep.paidTotal)} CC to worker</div>
+      ${subs}
+    </div>`;
+  }
+  if (kids && kids.length) {
+    return `<div class="decomp"><div class="rlabel">🧩 ${kids.length} on-ledger sub-escrow(s)</div>
+      ${kids.map((k) => `<div class="subchip"><span class="ref">${esc(k.payload.taskRef)}</span><span class="badge ${k.payload.status}">${k.payload.status}</span></div>`).join('')}</div>`;
+  }
+  return '';
 }
 
 const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
