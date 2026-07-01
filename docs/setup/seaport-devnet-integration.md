@@ -193,22 +193,33 @@ curl -s -X GET "$SEAPORT_LEDGER_URL/v2/state/ledger-end" \
 
 ---
 
-## 7. Settlement on DevNet — OPEN QUESTION Q2 (the money-moment)
+## 7. Settlement on DevNet — Q2 RESOLVED → **real Canton Coin settlement works on Seaport** ✅
 
-Our settlement is instrument-config (Amulet on LocalNet, USDCx on Test/MainNet). On the 5n
-sandbox we must find out **what token is reachable**:
+The **YES** branch: verified 2026-07-01, worker paid real CC on the public node
+(`npm run settle:seaport`: tap 200 → worker CC **0 → 100**, escrow → Paid). Everything the
+CIP-0056 Allocation/DvP flow needs is reachable with our m2m token:
 
-1. Does the sandbox expose an **Amulet (Canton Coin) CIP-0056 registry + factory** callable over
-   the API, and can the **Loop wallet faucet CC** to our parties?
-   - **YES** → set `instrumentId` to DevNet Amulet, fund via faucet, run the real
-     `SettlePayment` on Seaport → **money moves on a public node** (upgrades the headline from
-     LocalNet → public).
-   - **NO / uncertain** → fallback: run **lifecycle-only** on Seaport (status choices, still a
-     real live deploy) and keep **real settlement as the LocalNet recording**; or deploy our own
-     mock registry DAR to Seaport for real (if less prestigious) token movement.
-2. Reuse the existing settlement path (`EscrowService` fund→settle in `src/escrow.ts` +
-   `src/registry.ts`) — only the registry URL + `instrumentId` change; the Daml choices are
-   untouched.
+- **Token-standard registry** = the validator's **scan-proxy**:
+  base `https://wallet.validator.devnet.sandbox.fivenorth.io/api/validator/v0/scan-proxy`, under
+  which the CIP-0056 endpoints live (`/registry/metadata/v1/info`,
+  `/registry/allocation-instruction/v1/allocation-factory`,
+  `/registry/allocations/v1/{id}/choice-contexts/{kind}`). Requires `Authorization: Bearer` (our
+  OIDC token) — unlike LocalNet's open scan. `registry.ts` now branches: HTTPS + Bearer when
+  `registryHost` is empty (Seaport), else `node:http` + `Host` (LocalNet).
+- **Instrument admin (DSO)** = `DSO::1220be58c…` (`/registry/metadata/v1/info` `adminId`, matches
+  the on-ledger Amulet holdings' `instrumentId.admin`). Set `instrumentId = { admin: DSO, id: 'Amulet' }`.
+- **Faucet** = the validator wallet API on the same host: `GET /api/validator/v0/wallet/user-status`
+  (party `5nsandbox-devnet-2`, onboarded, **featured app right**), `POST /api/validator/v0/wallet/tap`
+  `{amount}` mints real CC. Our OIDC token is accepted (audience `validator-devnet-m2m` matches).
+  `config.validatorApi` is the host root; `wallet.ts` uses the async OIDC token on Seaport.
+  The wallet party already holds ~21M CC, so it also works as the allocation sender directly.
+- **Holding interface filter**: 3.5.6 wants the package-NAME form
+  `#splice-api-token-holding-v1:Splice.Api.Token.HoldingV1:Holding` (picked per target in config).
+
+Reused the existing `EscrowService` fund→settle path unchanged — only registry base URL + auth +
+`instrumentId` differ; the Daml choices are untouched. (Fallbacks — lifecycle-only, or a mock
+registry DAR — are no longer needed. Note the mock `splice-token-standard-test` registry is a
+Daml-**Script** harness, not JSON-API-drivable, so the real registry was the only viable public path.)
 
 ---
 
@@ -251,7 +262,8 @@ Update `DECK-PLAN.md` + `README.md`: "live on Seaport DevNet" for the reachable 
 5. [x] **Prod DAR uploaded + vetted** (§8, Q3) — `0.1.4` on validator `3.5.6`, no re-pin.
 6. [x] **Lifecycle e2e on Seaport** — `npm run e2e:seaport`: create→accept→complete→**Paid**,
        privacy holds (worker sees 1, outsider 0). Still TODO: eyeball it in the Contracts tab.
-7. [ ] Decide **settlement** (§7, Q2); wire instrument/registry or fall back.
+7. [x] **Settlement wired + proven real** (§7, Q2) — `npm run settle:seaport`: real CC 0→100 on
+       the public node via the validator scan-proxy registry + wallet faucet.
 8. [ ] Lock **topology** (§9); update `DECK-PLAN.md` + `README.md`.
 9. [ ] Write **ADR-0019** (deployment target = Seaport single-participant + OIDC auth).
 10. [ ] Append a "Seaport DevNet access" section to KB `platform-canton-network` (no secret).
@@ -264,7 +276,8 @@ Keep the LocalNet path intact as the video fallback throughout.
 
 1. ~~Party allocation on the shared validator with the m2m token?~~ **RESOLVED** → yes, Path A
    (user `6` = `ParticipantAdmin`). §5.
-2. Amulet registry + CC faucet reachable on the DevNet sandbox? (gates §7) — **still open, next.**
+2. ~~Amulet registry + CC faucet reachable on the DevNet sandbox?~~ **RESOLVED** → yes, both via
+   the validator scan-proxy + wallet API; real CC settlement proven (worker 0→100). §7.
 3. ~~Does the clean `0.1.4` DAR vet on DevNet as-is, or re-pin SDK?~~ **RESOLVED** → vets as-is on
    `3.5.6`. §8.
 4. External-party `prepare`/`execute` through the shared validator with m2m auth? (bonus §9) — open.
