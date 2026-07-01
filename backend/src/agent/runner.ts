@@ -34,6 +34,10 @@ export interface DecompositionReport {
   status: string;                  // parent escrow rollup status
 }
 
+// A sub-task the requester has reviewed (and possibly edited: brief, reward, assigned worker)
+// before approving execution. `worker` is optional — falls back to the parent's worker.
+export interface PlanItem { title: string; brief: string; reward: string; worker?: string; }
+
 const hash = (s: string): string => createHash('sha256').update(s).digest('hex');
 
 export class AgentRunner {
@@ -80,29 +84,38 @@ export class AgentRunner {
   }
 
   /**
-   * Dynamic decomposition: split the parent brief into sub-tasks, spin up an independent
-   * CHILD TaskEscrow for each (linked on-ledger via `parentRef`), run the full agent +
-   * fact-check + conditional-settlement pipeline on every child, then roll the parent up
-   * (status-only) to Paid. Each child is privately scoped and settles on its own, so a
-   * fabricated sub-answer is refunded while the sound ones still pay — partial settlement.
+   * PLAN (no side effects): propose a decomposition of the parent brief into sub-tasks with a
+   * reward split. Returned to the requester to review, edit, and price BEFORE any escrow is
+   * created — so they see exactly what they're paying for and can reassign/adjust it.
    */
-  async runDecomposed(parent: EscrowContract, brief?: string): Promise<DecompositionReport> {
+  async plan(parent: EscrowContract, brief?: string): Promise<Decomposition> {
     const t = parent.payload;
     const theBrief = brief ?? this.store.get(t.taskRef)?.brief ?? t.taskRef;
-    const dec = await decompose(theBrief, Number(t.amount));
+    if (brief) this.registerBrief(t.taskRef, brief);
+    return decompose(theBrief, Number(t.amount));
+  }
 
+  /**
+   * EXECUTE an approved (possibly edited) plan: for each sub-task spin up an independent CHILD
+   * TaskEscrow (linked on-ledger via `parentRef`) owned by its ASSIGNED worker, run the full
+   * agent + fact-check + conditional-settlement pipeline, then roll the parent up (status-only).
+   * Each child is privately scoped and settles on its own — sound sub-tasks pay, fabricated/
+   * errored ones refund (partial settlement). Resilient: one sub-task failing never aborts the batch.
+   */
+  async executePlan(parent: EscrowContract, items: PlanItem[]): Promise<DecompositionReport> {
+    const t = parent.payload;
     const subtasks: TaskReport[] = [];
-    for (const [i, sub] of dec.subtasks.entries()) {
+    for (const [i, sub] of items.entries()) {
       const childRef = `${t.taskRef}/sub-${i + 1}`;
+      const worker = sub.worker || t.worker;
       try {
         const child = await this.svc.createTask({
-          provider: t.provider, requester: t.requester, worker: t.worker, arbiter: t.arbiter,
+          provider: t.provider, requester: t.requester, worker, arbiter: t.arbiter,
           taskRef: childRef, amount: sub.reward, instrumentId: t.instrumentId, parentRef: t.taskRef,
         });
         const rep = await this.run(child, sub.brief);
         subtasks.push({ ...rep, title: sub.title });
       } catch (e) {
-        // One sub-task failing (agent/API/settlement error) must not abort the whole batch.
         subtasks.push({
           taskRef: childRef, brief: sub.brief, title: sub.title,
           result: { answer: `sub-task errored: ${(e as Error).message}`, citations: [], live: false },
@@ -118,8 +131,16 @@ export class AgentRunner {
     p = await this.svc.complete(p.contractId, t.worker, rollupHash);
     p = await this.svc.approve(p.contractId, t.requester);
 
+    const decomposition: Decomposition = { subtasks: items.map((s) => ({ title: s.title, brief: s.brief, reward: s.reward })), live: true };
     const paidTotal = subtasks.reduce(
-      (sum, s, i) => (s.outcome === 'paid' ? sum + Number(dec.subtasks[i]!.reward) : sum), 0);
-    return { taskRef: t.taskRef, decomposition: dec, subtasks, paidTotal: paidTotal.toFixed(4), status: p.payload.status };
+      (sum, s, i) => (s.outcome === 'paid' ? sum + Number(items[i]!.reward) : sum), 0);
+    return { taskRef: t.taskRef, decomposition, subtasks, paidTotal: paidTotal.toFixed(4), status: p.payload.status };
+  }
+
+  /** Plan + execute with the orchestrator's default assignment (all sub-tasks to the parent's
+   *  worker). The interactive path is plan() → requester edits → executePlan(). */
+  async runDecomposed(parent: EscrowContract, brief?: string): Promise<DecompositionReport> {
+    const dec = await this.plan(parent, brief);
+    return this.executePlan(parent, dec.subtasks.map((s) => ({ ...s, worker: parent.payload.worker })));
   }
 }

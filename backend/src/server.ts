@@ -73,24 +73,36 @@ route('POST', '/agent/run/:cid', async (p, b) => {
   if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
   return runner.run(esc, b.brief);
 });
-// Dynamic decomposition: split the parent task into child escrows, run + settle each, roll up.
-route('POST', '/agent/decompose/:cid', async (p, b) => {
+// Dynamic decomposition — PLAN: propose sub-tasks + reward split for the requester to review
+// and edit before paying. No escrows created, no side effects.
+route('POST', '/agent/plan/:cid', async (p, b) => {
   const esc = await svc.get(b.provider, p.cid!);
   if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
-  return runner.runDecomposed(esc, b.brief);
+  return runner.plan(esc, b.brief);
+});
+// Dynamic decomposition — EXECUTE an approved (possibly edited) plan: create + run + settle a
+// child escrow per sub-task with its assigned worker, then roll the parent up.
+route('POST', '/agent/execute/:cid', async (p, b) => {
+  const esc = await svc.get(b.provider, p.cid!);
+  if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
+  if (!Array.isArray(b.subtasks) || b.subtasks.length === 0) throw new HttpError(400, 'subtasks[] required');
+  return runner.executePlan(esc, b.subtasks);
 });
 // Demo provisioning: requester = the wallet party; allocate the other roles + an outsider
 // (no stake) and grant the backend CanActAs so it can drive every perspective.
 route('POST', '/admin/provision', async () => {
   const sfx = Math.random().toString(36).slice(2, 7);
   const requester = await walletParty();
-  const [provider, worker, arbiter, outsider] = await Promise.all([
-    ledger.allocateParty(`provider-${sfx}`), ledger.allocateParty(`worker-${sfx}`),
+  // A small pool of worker agents so a decomposition plan can assign sub-tasks to different ones.
+  const [provider, workerA, workerB, workerC, arbiter, outsider] = await Promise.all([
+    ledger.allocateParty(`provider-${sfx}`), ledger.allocateParty(`agent-alpha-${sfx}`),
+    ledger.allocateParty(`agent-beta-${sfx}`), ledger.allocateParty(`agent-gamma-${sfx}`),
     ledger.allocateParty(`arbiter-${sfx}`), ledger.allocateParty(`outsider-${sfx}`),
   ]);
-  await ledger.grantActAs(await currentUserId(), [requester, provider, worker, arbiter, outsider]);
+  const workers = [workerA, workerB, workerC];
+  await ledger.grantActAs(await currentUserId(), [requester, provider, ...workers, arbiter, outsider]);
   await tap('1000.0');
-  return { requester, provider, worker, arbiter, outsider };
+  return { requester, provider, worker: workerA, workers, arbiter, outsider };
 });
 
 class HttpError extends Error { constructor(public code: number, msg: string) { super(msg); } }

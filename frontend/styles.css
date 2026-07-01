@@ -119,3 +119,23 @@ button.tiny { padding: 6px 11px; font-size: 13px; }
 .subchip { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; }
 .subchip .ref { font-family: ui-monospace, monospace; font-size: 12.5px; }
+
+/* Plan editor (requester reviews/edits the decomposition before paying) */
+.plan-editor { margin-top: 12px; border-top: 1px dashed var(--accent); padding-top: 12px; }
+.pi-row { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; }
+.pi-main { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pi-main .pi-title { font-weight: 600; }
+.pi-side { display: flex; flex-direction: column; gap: 6px; align-items: stretch; flex: 0 0 130px; }
+.pi-side label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.plan-editor input, .plan-editor textarea, .plan-editor select {
+  background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 7px; padding: 6px 8px; font: inherit; font-size: 13px; width: 100%; }
+.plan-editor textarea { resize: vertical; line-height: 1.4; }
+.plan-editor input:focus, .plan-editor textarea:focus, .plan-editor select:focus { outline: none; border-color: var(--accent); }
+.pi-side label input, .pi-side label select { min-width: 0; }
+.pi-del { flex: 0 0 auto; align-self: flex-end; color: var(--red); border-color: #3a1c1c; }
+.pi-del:hover { border-color: var(--red); }
+.pi-foot { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.pi-total { font-size: 13px; color: var(--accent); font-weight: 600; }
+.pi-total.over { color: var(--amber); }
+.pi-run-group { margin-left: auto; display: flex; gap: 8px; }

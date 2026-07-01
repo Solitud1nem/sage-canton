@@ -15,7 +15,9 @@
     "probe:seaport": "tsx src/probe-seaport.ts",
     "probe:settlement": "tsx src/probe-settlement.ts",
     "e2e:seaport": "tsx src/seaport-e2e.ts",
-    "settle:seaport": "tsx src/seaport-settle.ts"
+    "settle:seaport": "tsx src/seaport-settle.ts",
+    "decompose:seaport": "tsx src/seaport-decompose.ts",
+    "plan:seaport": "tsx src/seaport-plan.ts"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
