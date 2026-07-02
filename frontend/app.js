@@ -1,5 +1,12 @@
 // Sage on Canton — demo UI over the backend REST API.
 const API = location.origin; // backend serves this page, so same origin
+// Optional API token for a publicly hosted backend (API_TOKEN env): open the UI once with
+// ?token=… — it is stored locally, stripped from the URL, and sent on every mutating call.
+const TOKEN = (() => {
+  const q = new URLSearchParams(location.search).get('token');
+  if (q) { localStorage.setItem('sage_token', q); history.replaceState(null, '', location.pathname); }
+  return q || localStorage.getItem('sage_token') || '';
+})();
 const $ = (id) => document.getElementById(id);
 const short = (p) => (p ? p.split('::')[0] + '::' + p.split('::')[1]?.slice(0, 6) + '…' : '');
 // Agents come from the on-ledger AgentRegistry: each has a name, capabilities and price, and a
@@ -23,7 +30,10 @@ const agentLabel = (p) => agentBy(p)?.name || short(p);
 async function api(method, path, body) {
   const res = await fetch(API + path, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json().catch(() => ({}));
@@ -82,6 +92,7 @@ function renderParties() {
     b.onclick = () => { perspective = b.dataset.p; renderParties(); refresh(); });
 }
 
+let refreshFailed = false; // only toast the FIRST poll failure, not one every 4s
 async function refresh() {
   if (!session || editingPlan) return; // don't clobber an in-progress plan edit
   try {
@@ -92,8 +103,10 @@ async function refresh() {
     ]);
     renderTasks(tasks);
     $('workerBal').textContent = `agents hold ${bals.reduce((s, b) => s + (b.amulet || 0), 0)} CC`;
+    refreshFailed = false;
   } catch (e) {
-    toast(e.message, true);
+    if (!refreshFailed) toast(e.message, true);
+    refreshFailed = true;
   }
 }
 
@@ -156,7 +169,12 @@ function renderTasks(tasks) {
 
   box.querySelectorAll('.actions button').forEach((b) => {
     const t = tops.find((x) => x.contractId === b.dataset.cid);
-    if (t) b.onclick = actionsFor(t)[Number(b.dataset.i)][1];
+    // Disable while the action is in flight — a double-clicked settle would otherwise fund
+    // a second allocation (the backend also guards, but don't even send the request).
+    if (t) b.onclick = async () => {
+      b.disabled = true;
+      try { await actionsFor(t)[Number(b.dataset.i)][1](); } finally { b.disabled = false; }
+    };
   });
   if (editingPlan) { const t = tops.find((x) => x.payload.taskRef === editingPlan); if (t) bindPlanEditor(t); }
 }
@@ -219,7 +237,7 @@ async function runPlan(t) {
 }
 
 function workerOptions(sel) {
-  return (session.agents || []).map((a) => `<option value="${a.party}" ${a.party === sel ? 'selected' : ''}>${esc(a.name)} · ${esc(a.pricing)} CC</option>`).join('');
+  return (session.agents || []).map((a) => `<option value="${esc(a.party)}" ${a.party === sel ? 'selected' : ''}>${esc(a.name)} · ${esc(a.pricing)} CC</option>`).join('');
 }
 
 // Editable plan the requester reviews before paying: per sub-task title, brief, assigned agent, reward.
@@ -249,7 +267,7 @@ function planEditorHtml(t) {
       <span class="pi-total ${over ? 'over' : ''}">total ${total.toFixed(2)} / ${budget.toFixed(0)} CC${over ? ' — over budget' : ''}</span>
       <span class="pi-run-group">
         <button class="pi-cancel tiny">Cancel</button>
-        <button class="pi-run tiny primary">✅ Approve &amp; delegate (${total.toFixed(2)} CC)</button>
+        <button class="pi-run tiny primary" ${over ? 'disabled' : ''}>✅ Approve &amp; delegate (${total.toFixed(2)} CC)</button>
       </span>
     </div>
   </div>`;
@@ -274,7 +292,9 @@ function bindPlanEditor(t) {
     const span = root.querySelector('.pi-total');
     span.textContent = `total ${total.toFixed(2)} / ${budget.toFixed(0)} CC${over ? ' — over budget' : ''}`;
     span.classList.toggle('over', over);
-    root.querySelector('.pi-run').textContent = `✅ Approve & delegate (${total.toFixed(2)} CC)`;
+    const run = root.querySelector('.pi-run');
+    run.textContent = `✅ Approve & delegate (${total.toFixed(2)} CC)`;
+    run.disabled = over; // the backend enforces the budget too; don't offer an invalid submit
   };
   // Live-edit without re-rendering (keeps focus). Reward edits refresh the running total.
   root.querySelectorAll('input,textarea,select').forEach((el) =>
