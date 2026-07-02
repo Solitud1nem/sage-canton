@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>V2 · Ops console — Sage on Canton</title>
+<style>
+:root {
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#2a3140; --line2:#39445a;
+  --text:#e6edf3; --muted:#8b97a7; --faint:#5c6878;
+  --accent:#4ade80; --accent2:#22c55e; --blue:#58a6ff; --amber:#f0b429; --violet:#c084fc; --red:#f47373;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:7px 12px;transition:.15s}
+button:hover{border-color:var(--accent)}
+button.primary{background:linear-gradient(180deg,var(--accent),var(--accent2));color:#06210f;border:none;font-weight:600}
+button.tiny{padding:5px 10px;font-size:12.5px}
+input{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 11px;font:inherit}
+input:focus{outline:none;border-color:var(--accent)}
+.mono{font-family:ui-monospace,Menlo,monospace}
+.wrap{padding:0 18px 24px;max-width:none}
+
+header{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{font-size:26px;filter:drop-shadow(0 0 10px #22c55e66)}
+.brand h1{margin:0;font-size:17px}.brand .on{color:var(--accent);font-weight:600}
+.tabs{display:flex;gap:4px;margin-left:22px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px}
+.tabs button{border:none;background:none;padding:6px 14px;border-radius:7px;color:var(--muted)}
+.tabs button.active{background:#0c2b18;color:var(--accent);font-weight:600}
+.net{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);background:var(--panel);border:1px solid var(--line);padding:6px 12px;border-radius:999px;margin-left:auto}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+
+/* KPI row spans full width */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.kpi .v{font-size:24px;font-weight:700;margin-top:2px}
+.kpi .v small{font-size:12px;color:var(--muted);font-weight:400}
+.kpi .sub{font-size:12px;color:var(--muted);margin-top:2px}
+.kpi.privacy{border-color:#14401f;background:#0c1f13}
+.kpi.privacy .v{color:var(--accent)}
+
+/* full-width command bar */
+.createbar{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:16px}
+.createbar input.brief{flex:1;min-width:0}
+.createbar input.amt{width:90px}
+.hint{color:var(--faint);font-size:12px;white-space:nowrap}
+
+/* the table */
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+thead th{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel2);font-weight:600}
+tbody td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr.row{cursor:pointer;transition:.1s}
+tbody tr.row:hover{background:#1a2029}
+tbody tr:last-child td{border-bottom:none}
+.ref{font-weight:600}
+.child .ref{font-weight:400;color:var(--muted);padding-left:22px;position:relative}
+.child .ref::before{content:"└";position:absolute;left:6px;color:var(--faint)}
+.cc{color:var(--accent);font-weight:650;white-space:nowrap}
+.who{color:var(--muted);font-size:12.5px}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;border:1px solid;white-space:nowrap}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.b-Created{color:var(--blue);border-color:#234;background:#11203a}
+.b-Accepted{color:var(--amber);border-color:#3a2f12;background:#2a2210}
+.b-Completed{color:var(--violet);border-color:#2e2440;background:#20122e}
+.b-Paid{color:var(--accent);border-color:#12331f;background:#0e2417}
+.b-Disputed{color:var(--red);border-color:#3a1c1c;background:#2a1212}
+.b-Refunded,.b-Expired{color:var(--muted);border-color:var(--line);background:var(--panel2)}
+.rowactions{display:flex;gap:6px;justify-content:flex-end}
+
+/* expanded detail row */
+tr.expand td{background:#10151d;padding:16px 18px}
+.exp{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:18px}
+.exp h4{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+.answer{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.55}
+.cites{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:5px}
+.cites li{display:flex;gap:8px;align-items:center;font-size:12px}
+.cites .ck{width:15px;text-align:center;font-weight:700}
+.ok .ck{color:var(--accent)} .bad .ck{color:var(--red)}
+.cites a{color:var(--blue);text-decoration:none;word-break:break-all}
+.bad a{color:var(--red)}
+.cites .st{color:var(--faint);margin-left:auto}
+.steps{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:12px;display:grid;gap:3px}
+footer{color:var(--faint);font-size:11.5px;padding:14px 2px;display:flex;gap:16px}
+@media (max-width:900px){.exp{grid-template-columns:1fr}.hide-sm{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">🌿</span><h1>Sage <span class="on">on Canton</span></h1></div>
+  <div class="tabs">
+    <button class="active">requester</button><button>agents</button><button>provider</button><button>outsider 🔒</button>
+  </div>
+  <div class="net"><span class="dot"></span> Seaport DevNet · 📦 offline LLM · pkg 018c4f4d…</div>
+</header>
+
+<div class="wrap">
+  <div class="kpis">
+    <div class="kpi"><div class="k">Tasks · this view</div><div class="v">7</div><div class="sub">3 paid · 1 refunded · 1 disputed</div></div>
+    <div class="kpi"><div class="k">Agents hold</div><div class="v">195 <small>CC</small></div><div class="sub">Web 120 · Docs 45 · Analyst 30</div></div>
+    <div class="kpi"><div class="k">Escrowed now</div><div class="v">120 <small>CC</small></div><div class="sub">2 open tasks</div></div>
+    <div class="kpi"><div class="k">Fact-check pass rate</div><div class="v">83%</div><div class="sub">10 of 12 citations resolved</div></div>
+    <div class="kpi privacy"><div class="k">Outsider sees</div><div class="v">0</div><div class="sub">🔒 sub-transaction privacy holds</div></div>
+  </div>
+
+  <div class="createbar">
+    <input class="brief" placeholder="Research brief — the agent researches it, the paid fact-checker verifies every citation" />
+    <input class="amt" type="number" value="100" /><span class="hint">CC</span>
+    <button class="primary">Fund &amp; create</button>
+    <span class="hint">tip: word “unverifiable” forces the failure path</span>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th style="width:34%">Task</th><th>Status</th><th>Reward</th><th class="hide-sm">Assigned to</th><th class="hide-sm">Fact-check</th><th style="text-align:right">Actions</th>
+    </tr></thead>
+    <tbody>
+      <tr class="row"><td class="ref">usdcx-registry-fee-model</td><td><span class="badge b-Created">Created</span></td><td class="cc">40 CC</td><td class="who hide-sm">unassigned</td><td class="who hide-sm">—</td>
+        <td><div class="rowactions"><button class="tiny primary">🤖 Run agent</button><button class="tiny">🧩 Plan</button></div></td></tr>
+
+      <tr class="row"><td class="ref">cip-0056-allocation-lifecycle</td><td><span class="badge b-Completed">Completed</span></td><td class="cc">80 CC</td><td class="who hide-sm">Docs Specialist</td><td class="who hide-sm">3/3 ✓</td>
+        <td><div class="rowactions"><button class="tiny primary">💸 Settle</button><button class="tiny">Dispute</button></div></td></tr>
+
+      <tr class="row" style="background:#151b24"><td class="ref">canton-settlement-architecture 🧩</td><td><span class="badge b-Paid">Paid</span></td><td class="cc">60 CC</td><td class="who hide-sm">3 agents</td><td class="who hide-sm">6/9 ✓</td>
+        <td><div class="rowactions"><button class="tiny">▾ collapse</button></div></td></tr>
+      <tr class="child"><td class="ref">sub-1 · Background &amp; definitions</td><td><span class="badge b-Paid">Paid</span></td><td class="cc">20 CC</td><td class="who hide-sm">Web Researcher</td><td class="who hide-sm">3/3 ✓</td><td></td></tr>
+      <tr class="child"><td class="ref">sub-2 · Mechanisms &amp; details</td><td><span class="badge b-Paid">Paid</span></td><td class="cc">25 CC</td><td class="who hide-sm">Docs Specialist</td><td class="who hide-sm">3/3 ✓</td><td></td></tr>
+      <tr class="child"><td class="ref">sub-3 · Benchmarks &amp; figures</td><td><span class="badge b-Refunded">Refunded</span></td><td class="cc">0 <small style="color:var(--faint)">of 15</small></td><td class="who hide-sm">Data Analyst</td><td class="who hide-sm">0/3 ✗</td><td></td></tr>
+      <tr class="expand"><td colspan="6">
+        <div class="exp">
+          <div>
+            <h4>sub-3 · Data Analyst — why it was NOT paid</h4>
+            <div class="answer">Synthesised findings rest on internal, unverifiable benchmarks; the cited whitepaper domain does not resolve.</div>
+            <ul class="cites">
+              <li class="bad"><span class="ck">✗</span><a href="#">nonexistent-source.invalid/whitepaper</a><span class="st">ENOTFOUND</span></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Pipeline</h4>
+            <ol class="steps">
+              <li>agent accepted sub-3 [role: analyst]</li>
+              <li>fact-check: 1/1 citation failed to resolve</li>
+              <li>requester disputed → arbiter refunded</li>
+              <li>worker paid <b>nothing</b> — funds never locked</li>
+            </ol>
+          </div>
+        </div>
+      </td></tr>
+
+      <tr class="row"><td class="ref">canton-privacy-for-settlement</td><td><span class="badge b-Paid">Paid</span></td><td class="cc">100 CC</td><td class="who hide-sm">Web Researcher</td><td class="who hide-sm">8/8 ✓</td><td></td></tr>
+      <tr class="row"><td class="ref">unverifiable-internal-benchmarks</td><td><span class="badge b-Refunded">Refunded</span></td><td class="cc">0 <small style="color:var(--faint)">of 50</small></td><td class="who hide-sm">Web Researcher</td><td class="who hide-sm">0/1 ✗</td><td></td></tr>
+    </tbody>
+  </table>
+
+  <footer><span>DSO::1220be58…</span><span>requester 5nsandbox…acf8</span><span>v2 JSON Ledger API · Seaport DevNet</span></footer>
+</div>
+</body>
+</html>

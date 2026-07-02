@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>V1 · Command center — Sage on Canton</title>
+<style>
+:root {
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#2a3140; --line2:#39445a;
+  --text:#e6edf3; --muted:#8b97a7; --faint:#5c6878;
+  --accent:#4ade80; --accent2:#22c55e; --blue:#58a6ff; --amber:#f0b429; --violet:#c084fc; --red:#f47373;
+}
+*{box-sizing:border-box} html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:7px 12px;transition:.15s}
+button:hover{border-color:var(--accent)}
+button.primary{background:linear-gradient(180deg,var(--accent),var(--accent2));color:#06210f;border:none;font-weight:600}
+button.tiny{padding:5px 10px;font-size:12.5px}
+input,select{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 11px;font:inherit}
+input:focus{outline:none;border-color:var(--accent)}
+.mono{font-family:ui-monospace,Menlo,monospace}
+
+/* ── header: thin, full-width, stats live here ─────────────────── */
+header{display:flex;align-items:center;gap:18px;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.logo{font-size:24px;filter:drop-shadow(0 0 10px #22c55e66)}
+.brand h1{margin:0;font-size:16px}.brand .on{color:var(--accent);font-weight:600}
+.stats{display:flex;gap:10px;margin-left:auto;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column;gap:1px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;min-width:104px}
+.stat .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.stat .v{font-size:16px;font-weight:650}
+.stat .v small{font-size:11px;color:var(--muted);font-weight:400}
+.net{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);padding:6px 12px;border-radius:999px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+
+/* ── 3-column app grid, fills viewport ─────────────────────────── */
+.app{flex:1;display:grid;grid-template-columns:288px minmax(0,1fr) 400px;min-height:0}
+.rail,.detail{overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+.rail{border-right:1px solid var(--line);background:#10151d}
+.detail{border-left:1px solid var(--line);background:#10151d}
+.main{overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:14px}
+
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.box h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+
+/* left rail */
+.persp{display:grid;gap:6px}
+.persp button{display:flex;justify-content:space-between;align-items:center;text-align:left}
+.persp button.active{background:#0c2b18;border-color:var(--accent);color:var(--accent);font-weight:600}
+.persp .n{font-size:12px;color:var(--muted)}
+.persp button.active .n{color:var(--accent)}
+.agent{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);margin-top:6px}
+.agent .nm{font-weight:600;font-size:13px}
+.agent .caps{font-size:11px;color:var(--muted)}
+.agent .cc{color:var(--accent);font-weight:650;font-size:13px;white-space:nowrap}
+.pid{font-size:11px;color:var(--blue)}
+.kv{display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;color:var(--muted)}
+.kv b{color:var(--text);font-weight:600}
+.privacy{border-color:#14401f;background:#0c1f13;color:var(--accent);font-size:12.5px;padding:10px 12px;border-radius:10px;border:1px solid #14401f}
+
+/* center: create bar + feed */
+.createbar{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;position:sticky;top:0;z-index:5}
+.createbar input.brief{flex:1;min-width:0}
+.createbar input.amt{width:90px}
+.feedhead{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin:2px 2px -6px}
+.task{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;transition:.12s}
+.task:hover{border-color:var(--line2)}
+.task.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.task .top{display:flex;align-items:center;gap:10px}
+.task .ref{font-weight:650}
+.task .amt{margin-left:auto;color:var(--accent);font-weight:650;white-space:nowrap}
+.task .meta{color:var(--muted);font-size:12px;margin-top:3px}
+.task .actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;border:1px solid}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.b-Created{color:var(--blue);border-color:#234;background:#11203a}
+.b-Accepted{color:var(--amber);border-color:#3a2f12;background:#2a2210}
+.b-Completed{color:var(--violet);border-color:#2e2440;background:#20122e}
+.b-Paid{color:var(--accent);border-color:#12331f;background:#0e2417}
+.b-Disputed{color:var(--red);border-color:#3a1c1c;background:#2a1212}
+.b-Refunded,.b-Expired{color:var(--muted);border-color:var(--line);background:var(--panel2)}
+.kids{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px;display:grid;gap:6px}
+.kid{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+.kid .ref{color:var(--text);font-weight:500}
+.kid .cc{margin-left:auto;color:var(--accent)}
+
+/* right: detail panel */
+.dhead{display:flex;align-items:center;gap:10px}
+.dhead .ref{font-weight:650;font-size:15px}
+.answer{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.55;margin-top:8px}
+.cites{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:5px}
+.cites li{display:flex;gap:8px;align-items:center;font-size:12px}
+.cites .ck{width:15px;text-align:center;font-weight:700}
+.ok .ck{color:var(--accent)} .bad .ck{color:var(--red)}
+.cites a{color:var(--blue);text-decoration:none;word-break:break-all}
+.bad a{color:var(--red)}
+.cites .st{color:var(--faint);margin-left:auto;white-space:nowrap}
+.steps{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:12px;display:grid;gap:3px}
+.outcome{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid}
+.outcome.paid{color:var(--accent);border-color:#12331f;background:#0e2417}
+footer{border-top:1px solid var(--line);color:var(--faint);font-size:11.5px;padding:6px 18px;display:flex;gap:16px}
+@media (max-width:1250px){.app{grid-template-columns:250px minmax(0,1fr)}.detail{display:none}}
+@media (max-width:820px){.app{grid-template-columns:minmax(0,1fr)}.rail{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">🌿</span><h1>Sage <span class="on">on Canton</span></h1></div>
+  <div class="net"><span class="dot"></span> Seaport DevNet · 📦 offline LLM</div>
+  <div class="stats">
+    <div class="stat"><span class="k">Tasks</span><span class="v">7 <small>3 paid</small></span></div>
+    <div class="stat"><span class="k">Agents hold</span><span class="v">195 <small>CC</small></span></div>
+    <div class="stat"><span class="k">Escrowed</span><span class="v">60 <small>CC</small></span></div>
+    <div class="stat"><span class="k">Outsider sees</span><span class="v">0 <small>escrows</small></span></div>
+  </div>
+</header>
+
+<div class="app">
+  <!-- LEFT RAIL: session + perspective + agents -->
+  <aside class="rail">
+    <div class="box">
+      <h3>Ledger view · perspective</h3>
+      <div class="persp">
+        <button class="active">requester <span class="n">7 tasks</span></button>
+        <button>agents <span class="n">7 tasks</span></button>
+        <button>provider <span class="n">7 tasks</span></button>
+        <button>outsider <span class="n">0 tasks 🔒</span></button>
+      </div>
+      <p class="privacy" style="margin:10px 0 0">Each party sees only its own escrows — sub-transaction privacy, live on the ledger.</p>
+    </div>
+    <div class="box">
+      <h3>Agent roster · on-ledger registry</h3>
+      <div class="agent"><div><div class="nm">Web Researcher</div><div class="caps">web-research · general</div></div><div class="cc">120 CC</div></div>
+      <div class="agent"><div><div class="nm">Docs Specialist</div><div class="caps">docs-research · standards</div></div><div class="cc">45 CC</div></div>
+      <div class="agent"><div><div class="nm">Data Analyst</div><div class="caps">web-research · data</div></div><div class="cc">30 CC</div></div>
+    </div>
+    <div class="box">
+      <h3>Session parties</h3>
+      <div class="kv"><span>requester</span><b class="pid mono">5nsandbox…acf8</b></div>
+      <div class="kv"><span>provider</span><b class="pid mono">provider-vxns1…</b></div>
+      <div class="kv"><span>arbiter</span><b class="pid mono">arbiter-vxns1…</b></div>
+      <div class="kv"><span>outsider</span><b class="pid mono">outsider-vxns1…</b></div>
+      <button class="tiny" style="width:100%;margin-top:8px">Re-provision session</button>
+    </div>
+  </aside>
+
+  <!-- CENTER: create bar + task feed -->
+  <main class="main">
+    <div class="createbar">
+      <input class="brief" placeholder="Research brief — e.g. Summarise Canton privacy for institutional settlement" />
+      <input class="amt" type="number" value="100" /> <span style="color:var(--muted);font-size:12px">CC</span>
+      <button class="primary">Fund &amp; create</button>
+    </div>
+
+    <div class="feedhead">Latest task</div>
+    <div class="task sel">
+      <div class="top"><span class="ref">canton-settlement-architecture</span><span class="badge b-Paid">Paid</span><span class="amt">60 CC</span></div>
+      <div class="meta">requester 5nsandbox… → 🧩 delegated to 3 agents · 2 paid · 1 refunded</div>
+      <div class="kids">
+        <div class="kid"><span class="badge b-Paid">Paid</span><span class="ref">/sub-1 Background &amp; definitions</span> <span>Web Researcher</span><span class="cc">20 CC</span></div>
+        <div class="kid"><span class="badge b-Paid">Paid</span><span class="ref">/sub-2 Mechanisms &amp; details</span> <span>Docs Specialist</span><span class="cc">25 CC</span></div>
+        <div class="kid"><span class="badge b-Refunded">Refunded</span><span class="ref">/sub-3 Benchmarks</span> <span>Data Analyst</span><span class="cc">0 CC</span></div>
+      </div>
+    </div>
+
+    <div class="feedhead">Previous · 4</div>
+    <div class="task">
+      <div class="top"><span class="ref">canton-privacy-for-settlement</span><span class="badge b-Paid">Paid</span><span class="amt">100 CC</span></div>
+      <div class="meta">requester 5nsandbox… → Web Researcher · fact-check 8/8 ✓</div>
+    </div>
+    <div class="task">
+      <div class="top"><span class="ref">unverifiable-internal-benchmarks</span><span class="badge b-Refunded">Refunded</span><span class="amt">50 CC</span></div>
+      <div class="meta">requester 5nsandbox… → Web Researcher · fabricated source caught → no payout</div>
+    </div>
+    <div class="task">
+      <div class="top"><span class="ref">cip-0056-allocation-lifecycle</span><span class="badge b-Completed">Completed</span><span class="amt">80 CC</span></div>
+      <div class="meta">requester 5nsandbox… → Docs Specialist · awaiting approval</div>
+      <div class="actions"><button class="tiny primary">💸 Settle (pay agent)</button><button class="tiny">Approve</button><button class="tiny">Dispute</button></div>
+    </div>
+    <div class="task">
+      <div class="top"><span class="ref">usdcx-registry-fee-model</span><span class="badge b-Created">Created</span><span class="amt">40 CC</span></div>
+      <div class="meta">requester 5nsandbox… → unassigned · deadline in 54 min</div>
+      <div class="actions"><button class="tiny primary">🤖 Run agent</button><button class="tiny">🧩 Plan &amp; delegate</button></div>
+    </div>
+  </main>
+
+  <!-- RIGHT: detail of the selected task -->
+  <aside class="detail">
+    <div class="box">
+      <div class="dhead"><span class="ref">canton-settlement-architecture</span><span class="badge b-Paid">Paid</span></div>
+      <div class="kv" style="margin-top:6px"><span>reward</span><b>60 CC · 40 paid out</b></div>
+      <div class="kv"><span>lineage</span><b>parent of 3 sub-escrows</b></div>
+      <div class="kv"><span>result hash</span><b class="mono">sha256 1f2ab8…</b></div>
+    </div>
+    <div class="box">
+      <h3>Sub-task 2 · Docs Specialist <span class="outcome paid" style="float:right">✓ paid 25 CC</span></h3>
+      <div class="answer">CIP-0056 defines allocation as a two-phase DvP primitive: the sender locks holdings into an Allocation whose executor settles it atomically against the counter-leg…</div>
+      <h3 style="margin-top:12px">Citations · paid fact-check</h3>
+      <ul class="cites">
+        <li class="ok"><span class="ck">✓</span><a href="#">docs.daml.com/canton/tokenstandard</a><span class="st">200</span></li>
+        <li class="ok"><span class="ck">✓</span><a href="#">canton.network/cip-0056</a><span class="st">200</span></li>
+        <li class="ok"><span class="ck">✓</span><a href="#">github.com/hyperledger-labs/splice</a><span class="st">200</span></li>
+      </ul>
+      <h3 style="margin-top:12px">Pipeline · 6 steps</h3>
+      <ol class="steps">
+        <li>agent accepted /sub-2 [role: docs]</li>
+        <li>agent produced 3 citations [offline]</li>
+        <li>completed — result hash on-ledger</li>
+        <li>fact-check: all 3 citations resolve</li>
+        <li>allocation funded — 25 CC locked</li>
+        <li>settled — worker paid 25 CC</li>
+      </ol>
+    </div>
+  </aside>
+</div>
+<footer><span>pkg 018c4f4d…</span><span>DSO::1220be58…</span><span>v2 JSON Ledger API</span></footer>
+</body>
+</html>

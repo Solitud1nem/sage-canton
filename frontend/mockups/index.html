@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sage on Canton — UI mockups</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--line:#2a3140;--text:#e6edf3;--muted:#8b97a7;--accent:#4ade80}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;padding:28px}
+h1{font-size:20px;margin:0 0 4px}
+h1 span{color:var(--accent)}
+p.lead{color:var(--muted);margin:0 0 24px;font-size:13.5px}
+.variant{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:28px;overflow:hidden}
+.vh{display:flex;align-items:baseline;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.vh b{font-size:16px}
+.vh .d{color:var(--muted);font-size:13px}
+.vh a{margin-left:auto;color:#06210f;background:var(--accent);text-decoration:none;font-weight:600;font-size:13px;padding:6px 14px;border-radius:8px;white-space:nowrap}
+iframe{display:block;width:100%;height:640px;border:none;background:var(--bg)}
+</style>
+</head>
+<body>
+<h1>🌿 Sage <span>on Canton</span> — full-width UI mockups</h1>
+<p class="lead">Three full-width layout candidates for the demo UI. Open each one (button) or skim the previews below — the chosen variant becomes the live UI.</p>
+
+<div class="variant">
+  <div class="vh"><b>V1 · Command center</b><span class="d">3 panes: controls on the left · task feed in the center · selected-task detail always visible on the right</span><a href="v1-command-center.html" target="_blank">Open V1 ↗</a></div>
+  <iframe src="v1-command-center.html" title="V1"></iframe>
+</div>
+
+<div class="variant">
+  <div class="vh"><b>V2 · Ops console</b><span class="d">KPI tiles on top · tasks as a full-width table with expandable detail rows · perspective as header tabs</span><a href="v2-ops-console.html" target="_blank">Open V2 ↗</a></div>
+  <iframe src="v2-ops-console.html" title="V2"></iframe>
+</div>
+
+<div class="variant">
+  <div class="vh"><b>V3 · Lifecycle board</b><span class="d">kanban over the escrow state machine: Open → In progress → Settled / No payout — tasks travel across columns</span><a href="v3-lifecycle-board.html" target="_blank">Open V3 ↗</a></div>
+  <iframe src="v3-lifecycle-board.html" title="V3"></iframe>
+</div>
+</body>
+</html>

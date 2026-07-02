@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>V3 · Lifecycle board — Sage on Canton</title>
+<style>
+:root {
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#2a3140; --line2:#39445a;
+  --text:#e6edf3; --muted:#8b97a7; --faint:#5c6878;
+  --accent:#4ade80; --accent2:#22c55e; --blue:#58a6ff; --amber:#f0b429; --violet:#c084fc; --red:#f47373;
+}
+*{box-sizing:border-box} html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:7px 12px;transition:.15s}
+button:hover{border-color:var(--accent)}
+button.primary{background:linear-gradient(180deg,var(--accent),var(--accent2));color:#06210f;border:none;font-weight:600}
+button.tiny{padding:5px 10px;font-size:12.5px}
+input{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 11px;font:inherit}
+input:focus{outline:none;border-color:var(--accent)}
+
+header{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{font-size:24px;filter:drop-shadow(0 0 10px #22c55e66)}
+.brand h1{margin:0;font-size:16px}.brand .on{color:var(--accent);font-weight:600}
+.tabs{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px}
+.tabs button{border:none;background:none;padding:5px 13px;border-radius:7px;color:var(--muted)}
+.tabs button.active{background:#0c2b18;color:var(--accent);font-weight:600}
+.net{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);background:var(--panel);border:1px solid var(--line);padding:6px 12px;border-radius:999px;margin-left:auto}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+.bal{font-size:12.5px;color:var(--accent);font-weight:650;background:#0c1f13;border:1px solid #14401f;padding:6px 12px;border-radius:999px}
+
+.createbar{display:flex;gap:10px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--line);background:#10151d}
+.createbar input.brief{flex:1;min-width:0}
+.createbar input.amt{width:90px}
+.hint{color:var(--faint);font-size:12px;white-space:nowrap}
+
+/* the board — fills the rest of the viewport, columns share full width */
+.board{flex:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;min-height:0}
+.col{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+.col:last-child{border-right:none}
+.colhead{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg)}
+.colhead .t{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px}
+.colhead .n{font-size:11.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:0 8px}
+.colhead .arrow{margin-left:auto;color:var(--faint);font-size:11px}
+.col.open  .t{color:var(--blue)}
+.col.work  .t{color:var(--amber)}
+.col.paid  .t{color:var(--accent)}
+.col.fail  .t{color:var(--red)}
+.cards{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 13px;transition:.12s}
+.card:hover{border-color:var(--line2)}
+.card .top{display:flex;align-items:baseline;gap:8px}
+.card .ref{font-weight:600;font-size:13px;word-break:break-word}
+.card .cc{margin-left:auto;color:var(--accent);font-weight:650;font-size:13px;white-space:nowrap}
+.card .who{color:var(--muted);font-size:11.5px;margin-top:3px}
+.card .sub{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);margin-top:6px}
+.card .stage{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase}
+.card .actions{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+.card.paid-glow{border-color:#12331f}
+.card.fail-glow{border-color:#3a1c1c}
+.checks{display:flex;gap:3px;margin-top:8px}
+.chk{width:14px;height:14px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:800}
+.chk.ok{background:#0e2417;color:var(--accent);border:1px solid #12331f}
+.chk.bad{background:#2a1212;color:var(--red);border:1px solid #3a1c1c}
+.mini{font-size:11px;color:var(--faint);margin-top:6px}
+.privacy-strip{padding:8px 18px;border-top:1px solid #14401f;background:#0c1f13;color:var(--accent);font-size:12.5px;display:flex;gap:8px;align-items:center}
+@media (max-width:1000px){.board{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:600px){.board{grid-template-columns:minmax(0,1fr)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">🌿</span><h1>Sage <span class="on">on Canton</span></h1></div>
+  <div class="tabs"><button class="active">requester</button><button>agents</button><button>provider</button><button>outsider 🔒</button></div>
+  <span class="bal">agents hold 195 CC</span>
+  <div class="net"><span class="dot"></span> Seaport DevNet · 📦 offline LLM</div>
+</header>
+
+<div class="createbar">
+  <input class="brief" placeholder="Research brief — fund it, then run the agent or split it across specialists" />
+  <input class="amt" type="number" value="100" /><span class="hint">CC</span>
+  <button class="primary">Fund &amp; create</button>
+  <button>🧩 Plan &amp; delegate</button>
+</div>
+
+<div class="board">
+  <!-- CREATED -->
+  <div class="col open">
+    <div class="colhead"><span class="t">Open</span><span class="n">2</span><span class="arrow">Accept ⟶</span></div>
+    <div class="cards">
+      <div class="card">
+        <div class="top"><span class="ref">usdcx-registry-fee-model</span><span class="cc">40 CC</span></div>
+        <div class="who">→ unassigned · deadline in 54 min</div>
+        <div class="actions"><button class="tiny primary">🤖 Run agent</button><button class="tiny">🧩 Plan</button></div>
+      </div>
+      <div class="card">
+        <div class="top"><span class="ref">privacy-vs-pqs-read-model</span><span class="cc">30 CC</span></div>
+        <div class="who">→ unassigned · deadline in 3 h</div>
+        <div class="actions"><button class="tiny primary">🤖 Run agent</button><button class="tiny">Refund</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IN PROGRESS -->
+  <div class="col work">
+    <div class="colhead"><span class="t">In progress</span><span class="n">2</span><span class="arrow">Approve ⟶</span></div>
+    <div class="cards">
+      <div class="card">
+        <div class="top"><span class="ref">cip-0056-allocation-lifecycle</span><span class="cc">80 CC</span></div>
+        <div class="who">Docs Specialist · Completed — awaiting settlement</div>
+        <div class="checks"><span class="chk ok">✓</span><span class="chk ok">✓</span><span class="chk ok">✓</span><span class="mini" style="margin:0 0 0 4px">fact-check 3/3</span></div>
+        <div class="actions"><button class="tiny primary">💸 Settle (pay agent)</button><button class="tiny">Dispute</button></div>
+      </div>
+      <div class="card">
+        <div class="top"><span class="ref">arc-vs-canton-comparison</span><span class="cc">55 CC</span></div>
+        <div class="who">Web Researcher · Accepted — researching…</div>
+        <div class="mini">accepted 2 min ago</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTLED -->
+  <div class="col paid">
+    <div class="colhead"><span class="t">Settled · paid</span><span class="n">3</span></div>
+    <div class="cards">
+      <div class="card paid-glow">
+        <div class="top"><span class="ref">canton-settlement-architecture 🧩</span><span class="cc">45 / 60 CC</span></div>
+        <div class="who">3 sub-escrows · 2 paid · 1 refunded</div>
+        <div class="mini">└ sub-1 Web 20 CC ✓ · sub-2 Docs 25 CC ✓ · sub-3 Analyst ✗</div>
+      </div>
+      <div class="card paid-glow">
+        <div class="top"><span class="ref">canton-privacy-for-settlement</span><span class="cc">100 CC</span></div>
+        <div class="who">Web Researcher · 8/8 citations ✓ · real CC moved</div>
+        <div class="checks"><span class="chk ok">✓</span><span class="chk ok">✓</span><span class="chk ok">✓</span><span class="chk ok">✓</span><span class="chk ok">✓</span><span class="chk ok">✓</span><span class="chk ok">✓</span><span class="chk ok">✓</span></div>
+      </div>
+      <div class="card paid-glow">
+        <div class="top"><span class="ref">daml-vs-solidity-authz</span><span class="cc">70 CC</span></div>
+        <div class="who">Docs Specialist · 4/4 citations ✓</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NO PAYOUT -->
+  <div class="col fail">
+    <div class="colhead"><span class="t">No payout</span><span class="n">2</span></div>
+    <div class="cards">
+      <div class="card fail-glow">
+        <div class="top"><span class="ref">unverifiable-internal-benchmarks</span><span class="cc" style="color:var(--red)">0 of 50 CC</span></div>
+        <div class="who">fabricated source → disputed → refunded</div>
+        <div class="checks"><span class="chk bad">✗</span><span class="mini" style="margin:0 0 0 4px">nonexistent-source.invalid — ENOTFOUND</span></div>
+      </div>
+      <div class="card fail-glow">
+        <div class="top"><span class="ref">stale-task-never-accepted</span><span class="cc" style="color:var(--muted)">Expired</span></div>
+        <div class="who">deadline passed → auto-expired → refunded</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="privacy-strip">🔒 outsider sees <b>0</b> of these escrows — flip the perspective tab to prove it on the live ledger</div>
+</body>
+</html>
