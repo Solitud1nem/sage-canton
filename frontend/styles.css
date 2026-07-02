@@ -44,6 +44,9 @@ button.tiny { padding: 6px 11px; font-size: 13px; }
 .pill { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .pill .role { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .pill .pid { font-family: ui-monospace, monospace; font-size: 12px; color: var(--blue); word-break: break-all; }
+.pill.agent { border-color: #14401f; background: #0c1f13; }
+.pill.agent .role { color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 600; }
+.pill.agent .caps { font-size: 11px; color: var(--muted); margin-top: 3px; }
 
 .perspective { display: flex; gap: 6px; flex-wrap: wrap; }
 .perspective button.active { background: var(--accent); color: #06210f; border-color: var(--accent); font-weight: 600; }

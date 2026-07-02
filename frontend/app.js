@@ -2,9 +2,9 @@
 const API = location.origin; // backend serves this page, so same origin
 const $ = (id) => document.getElementById(id);
 const short = (p) => (p ? p.split('::')[0] + '::' + p.split('::')[1]?.slice(0, 6) + '…' : '');
-// The MVP provisions a pool of interchangeable research agents (a real Sage would pull named,
-// capability-tagged agents from the AgentRegistry). Name them plainly rather than by symbol.
-const agentName = (i) => `Agent ${i + 1}`;
+// Agents come from the on-ledger AgentRegistry: each has a name, capabilities and price, and a
+// genuinely different research behaviour (see backend agent/research.js roles).
+const agentBy = (p) => (session?.agents || []).find((a) => a.party === p);
 
 let session = null;            // { requester, provider, worker, workers[], arbiter, outsider }
 let perspective = 'requester';
@@ -17,8 +17,8 @@ const decomps = {};            // parent taskRef -> last DecompositionReport
 const plans = {};              // parent taskRef -> editable plan { live, items:[{title,brief,reward,worker}] }
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task-' + Math.random().toString(36).slice(2, 7);
 const esc = (s) => String(s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-const agents = () => session?.workers?.length ? session.workers : [session?.worker].filter(Boolean);
-const agentLabel = (p) => { const i = agents().indexOf(p); return i >= 0 ? agentName(i) : short(p); };
+const agents = () => (session?.agents?.length ? session.agents.map((a) => a.party) : (session?.workers || [session?.worker].filter(Boolean)));
+const agentLabel = (p) => agentBy(p)?.name || short(p);
 
 async function api(method, path, body) {
   const res = await fetch(API + path, {
@@ -73,7 +73,8 @@ function renderParties() {
   $('parties').classList.remove('hidden');
   const pill = (role, pid) => `<div class="pill"><div class="role">${role}</div><div class="pid">${short(pid)}</div></div>`;
   const base = ['requester', 'provider', 'arbiter', 'outsider'].map((r) => pill(r, session[r]));
-  const wk = agents().map((w, i) => pill(agentName(i), w));
+  const wk = (session.agents || []).map((a) =>
+    `<div class="pill agent"><div class="role">${esc(a.name)} · ${esc(a.pricing)} CC</div><div class="caps">${(a.capabilities || []).map(esc).join(' · ')}</div></div>`);
   $('parties').innerHTML = [...base, ...wk].join('');
   $('perspective').innerHTML = ['requester', 'worker', 'provider', 'outsider'].map((r) =>
     `<button class="tiny ${r === perspective ? 'active' : ''}" data-p="${r}">${r === 'worker' ? 'agents' : r}</button>`).join('');
@@ -210,7 +211,7 @@ async function runPlan(t) {
 }
 
 function workerOptions(sel) {
-  return agents().map((w, i) => `<option value="${w}" ${w === sel ? 'selected' : ''}>${agentName(i)}</option>`).join('');
+  return (session.agents || []).map((a) => `<option value="${a.party}" ${a.party === sel ? 'selected' : ''}>${esc(a.name)} · ${esc(a.pricing)} CC</option>`).join('');
 }
 
 // Editable plan the requester reviews before paying: per sub-task title, brief, assigned agent, reward.
@@ -267,9 +268,15 @@ function bindPlanEditor(t) {
     span.classList.toggle('over', over);
     root.querySelector('.pi-run').textContent = `✅ Approve & delegate (${total.toFixed(2)} CC)`;
   };
-  // Live-edit without re-rendering (keeps focus). Reward edits also refresh the running total.
+  // Live-edit without re-rendering (keeps focus). Reward edits refresh the running total.
   root.querySelectorAll('input,textarea,select').forEach((el) =>
     el.addEventListener('input', () => { if (el.classList.contains('pi-reward')) updateTotal(); }));
+  // Reassigning an agent sets the reward to that agent's list price (from the registry).
+  root.querySelectorAll('.pi-worker').forEach((sel) => sel.addEventListener('change', () => {
+    const a = agentBy(sel.value);
+    if (a) sel.closest('.pi-row').querySelector('.pi-reward').value = a.pricing;
+    updateTotal();
+  }));
   root.querySelectorAll('.pi-del').forEach((b, i) => b.onclick = () => { sync(); plans[ref].items.splice(i, 1); renderTasks(lastTasks); });
   root.querySelector('.pi-add').onclick = () => { sync(); plans[ref].items.push({ title: 'New sub-task', brief: '', reward: '0', worker: session.worker }); renderTasks(lastTasks); };
   root.querySelector('.pi-cancel').onclick = () => { editingPlan = null; delete plans[ref]; renderTasks(lastTasks); refresh(); };

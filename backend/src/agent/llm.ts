@@ -40,12 +40,18 @@ function fallback(prompt: string): string {
 // then verifies honestly. No offline stub here; callers use `complete`'s fallback when no key.
 export interface SearchResult { answer: string; citations: string[]; live: boolean; }
 
-export async function researchWithSearch(system: string, prompt: string, maxUses = 4): Promise<SearchResult> {
+// Per-agent search configuration — how a given research agent actually searches differently.
+export interface SearchOpts { maxUses?: number; allowedDomains?: string[]; blockedDomains?: string[]; }
+
+export async function researchWithSearch(system: string, prompt: string, opts: SearchOpts = {}): Promise<SearchResult> {
   const key = process.env.ANTHROPIC_API_KEY!;
   const messages: { role: string; content: unknown }[] = [{ role: 'user', content: prompt }];
   const blocks: any[] = [];
   // web_search_20260209 (dynamic filtering) needs Opus 4.8/4.7/4.6 or Sonnet 5/4.6.
-  const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxUses }];
+  const tool: Record<string, unknown> = { type: 'web_search_20260209', name: 'web_search', max_uses: opts.maxUses ?? 4 };
+  if (opts.allowedDomains?.length) tool['allowed_domains'] = opts.allowedDomains;
+  if (opts.blockedDomains?.length) tool['blocked_domains'] = opts.blockedDomains;
+  const tools = [tool];
   for (let i = 0; i < 4; i++) {
     // Bound each turn so a long server-side search loop can't hang past undici's headers timeout.
     const ctrl = new AbortController();

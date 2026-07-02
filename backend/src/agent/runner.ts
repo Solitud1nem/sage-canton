@@ -9,9 +9,10 @@
 import { createHash } from 'node:crypto';
 import type { EscrowContract } from '../types.js';
 import { EscrowService } from '../escrow.js';
-import { research, type ResearchResult } from './research.js';
+import { research, type ResearchResult, type RoleKey } from './research.js';
 import { factCheck, type Verdict } from './factcheck.js';
 import { decompose, type Decomposition } from './orchestrator.js';
+import type { Party } from '../types.js';
 
 export interface TaskReport {
   taskRef: string;
@@ -43,11 +44,18 @@ const hash = (s: string): string => createHash('sha256').update(s).digest('hex')
 export class AgentRunner {
   // off-ledger content store (brief + produced result), keyed by taskRef
   readonly store = new Map<string, { brief: string; result?: ResearchResult }>();
+  // which specialised role each agent party plays (drives how it researches)
+  private readonly roles = new Map<Party, RoleKey>();
 
   constructor(private svc: EscrowService) {}
 
   registerBrief(taskRef: string, brief: string): void {
     this.store.set(taskRef, { brief });
+  }
+
+  /** Map an agent party to its specialisation, so its sub-tasks research the way it should. */
+  registerAgent(party: Party, role: RoleKey): void {
+    this.roles.set(party, role);
   }
 
   /** Run the full agent + fact-check + conditional settlement for a Created escrow. */
@@ -59,8 +67,9 @@ export class AgentRunner {
 
     // worker accepts and does the work
     let esc = await this.svc.accept(escrow.contractId, t.worker);
-    log.push(`agent accepted ${t.taskRef}`);
-    const result = await research(theBrief);
+    const role = this.roles.get(t.worker) ?? 'web';
+    log.push(`agent accepted ${t.taskRef} [role: ${role}]`);
+    const result = await research(theBrief, role);
     this.store.get(t.taskRef)!.result = result;
     const resultHash = hash(JSON.stringify(result));
     log.push(`agent produced ${result.citations.length} citation(s) [${result.live ? 'live LLM' : 'offline'}]`);

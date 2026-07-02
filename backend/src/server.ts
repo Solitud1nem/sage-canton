@@ -13,6 +13,7 @@ import { Automation } from './automation.js';
 import { tap, walletParty } from './wallet.js';
 import { currentUserId } from './jwt.js';
 import { AgentRunner } from './agent/runner.js';
+import { AgentRegistryService, AGENT_ROLES } from './agents.js';
 import { llmMode } from './agent/llm.js';
 import type { InstrumentId, Party } from './types.js';
 
@@ -20,6 +21,7 @@ const ledger = new LedgerClient();
 const registry = new RegistryClient();
 const svc = new EscrowService(config.packageId, ledger, registry);
 const runner = new AgentRunner(svc);
+const agentReg = new AgentRegistryService(config.packageId, ledger);
 const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'frontend');
 let dso = '';
 
@@ -101,8 +103,20 @@ route('POST', '/admin/provision', async () => {
   ]);
   const workers = [workerA, workerB, workerC];
   await ledger.grantActAs(await currentUserId(), [requester, provider, ...workers, arbiter, outsider]);
+  // Register each agent on-ledger (AgentRegistry) with a real specialisation, and tell the
+  // runner which party plays which role so its sub-tasks research accordingly.
+  const roster = AGENT_ROLES.map((role, i) => ({ party: workers[i]!, role }));
+  await agentReg.register(provider, roster);
+  roster.forEach((r) => runner.registerAgent(r.party, r.role.key));
   await tap('1000.0');
-  return { requester, provider, worker: workerA, workers, arbiter, outsider };
+  const agents = await agentReg.list(provider); // read back from the on-ledger registry
+  return { requester, provider, worker: workerA, workers, arbiter, outsider, agents };
+});
+// Read the agent registry (on-ledger AgentProfiles this operator published).
+route('GET', '/agents', async (_p, _b, url) => {
+  const operator = url.searchParams.get('operator');
+  if (!operator) throw new HttpError(400, 'operator query param required');
+  return agentReg.list(operator);
 });
 
 class HttpError extends Error { constructor(public code: number, msg: string) { super(msg); } }

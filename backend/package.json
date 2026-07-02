@@ -17,7 +17,8 @@
     "e2e:seaport": "tsx src/seaport-e2e.ts",
     "settle:seaport": "tsx src/seaport-settle.ts",
     "decompose:seaport": "tsx src/seaport-decompose.ts",
-    "plan:seaport": "tsx src/seaport-plan.ts"
+    "plan:seaport": "tsx src/seaport-plan.ts",
+    "agents:seaport": "tsx src/seaport-agents.ts"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
