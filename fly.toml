@@ -1,0 +1,33 @@
+# sage-canton demo (backend + UI) on Fly.io — the judge-reachable live product.
+# Talks to the Seaport DevNet shared validator over the v2 JSON Ledger API.
+#
+# One-time setup:
+#   fly apps create sage-canton
+#   grep -E '^(SEAPORT_CLIENT_SECRET|ANTHROPIC_API_KEY|API_TOKEN)=' backend/.env | fly secrets import
+# Deploy:
+#   fly deploy
+# Judge link:  https://sage-canton.fly.dev/?token=<API_TOKEN>
+
+app = "sage-canton"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8088"
+  LEDGER_TARGET = "seaport-devnet"
+
+[http_service]
+  internal_port = 8088
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # keep one machine warm during the judging window (a cold start is only ~2s,
+  # but the demo should never make a judge wait)
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

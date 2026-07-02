@@ -1,67 +1,63 @@
-# Public demo hosting — Cloudflare Tunnel in front of the local backend
+# Public demo hosting — the judge-reachable live product
 
-The judge-reachable "live product" link. The backend stays on the dev machine (it holds
-the Seaport OIDC secret and the CanActAs rights; nothing secret leaves the box) and talks
-to the Seaport DevNet shared validator; a Cloudflare Tunnel exposes it over public HTTPS.
-
-```
-judge's browser ──HTTPS──▶ Cloudflare edge ──tunnel──▶ localhost:8088 (backend+UI)
-                                                            │ OIDC m2m (8h refresh)
-                                                            ▼
-                                          Seaport DevNet shared validator (v2 JSON API)
-```
-
-## Access control
-
-The REST surface is god-mode (the backend can act as every demo party), so mutating
-routes are gated: set `API_TOKEN=<random>` in `backend/.env` (`openssl rand -hex 16`).
-The UI picks the token up once from the query string and stores it locally — the link to
-hand out is:
+The demo backend holds the Seaport OIDC secret and CanActAs rights for every demo party,
+so its REST surface is gated: set `API_TOKEN=<random>` in the environment
+(`openssl rand -hex 16`) and hand out the UI link as
 
 ```
 https://<public-host>/?token=<API_TOKEN>
 ```
 
-GET routes (health, party-scoped task lists, balances) stay open; they leak nothing
-without knowing full party ids. `scripts/serve-public.sh` refuses to start without a
-token.
+The UI picks the token up once from the query string, stores it locally, strips it from
+the URL, and sends it on every mutating call. GET routes (health, party-scoped lists,
+balances) stay open; they leak nothing without full party ids.
 
-## Quick tunnel (testing only)
-
-```bash
-./scripts/serve-public.sh        # prints a random https://….trycloudflare.com URL
+```
+judge's browser ──HTTPS──▶ backend+UI (Fly.io) ──OIDC m2m──▶ Seaport DevNet validator
+                                                              (v2 JSON Ledger API)
 ```
 
-No Cloudflare account needed. The URL changes on every restart and has no uptime
-guarantee — never hand it to judges.
+## Primary: Fly.io (deployed, verified 2026-07-02)
 
-## Named tunnel (the judge link)
+Mirrors the EVM Sage pattern (`sage-demo-agents.fly.dev`). One container = backend + UI,
+stable URL, independent of any dev machine: **https://sage-canton.fly.dev**.
 
-One-time setup (needs a Cloudflare account with a zone/domain added):
-
-```bash
-cloudflared tunnel login                       # browser auth; select the zone
-cloudflared tunnel create sage-canton          # writes ~/.cloudflared/<id>.json creds
-cloudflared tunnel route dns sage-canton demo.<your-zone>   # CNAME -> the tunnel
-```
-
-Run:
+One-time setup:
 
 ```bash
-TUNNEL_NAME=sage-canton ./scripts/serve-public.sh
-# -> https://demo.<your-zone>/?token=<API_TOKEN>
+fly apps create sage-canton
+grep -E '^(SEAPORT_CLIENT_SECRET|ANTHROPIC_API_KEY|API_TOKEN)=' backend/.env | fly secrets import
 ```
 
-Keep the machine awake for the judging window; the 8h Seaport OIDC token auto-refreshes.
+Deploy (config in `fly.toml`, image in `Dockerfile`, context trimmed by `.dockerignore`):
 
-## Network gotchas (verified 2026-07-02)
+```bash
+fly deploy --remote-only
+```
 
+Notes:
+- `min_machines_running = 1` keeps one machine warm for the judging window (a cold start
+  is ~2 s; scale to 0 after judging to stop paying).
+- Secrets live in Fly, not in the image; `LEDGER_TARGET=seaport-devnet` is plain env in
+  `fly.toml`.
+- Verified end-to-end through the public URL: provision → create task → agent run with
+  live web-search research → fact-check (8/8 citations) → REAL Canton Coin settlement,
+  worker 0 → 100 CC on the Seaport node.
+
+## Fallback: Cloudflare Tunnel to a local backend
+
+If Fly is unavailable, `scripts/serve-public.sh` exposes a locally running backend via a
+Cloudflare Tunnel (quick tunnel for testing — ephemeral URL; named tunnel for a stable
+hostname, needs `cloudflared tunnel login` + a zone in the account). The script refuses
+to start without `API_TOKEN` in `backend/.env`.
+
+Network gotchas (verified 2026-07-02):
 - Some ISPs block parts of Cloudflare's `104.16.0.0/13` range. Symptom: quick tunnel
   fails with `Post "https://api.trycloudflare.com/tunnel": context deadline exceeded`
-  while `www.cloudflare.com` (different range) works. Workaround for the QUICK tunnel:
-  pin the API host to a reachable Cloudflare edge IP in `/etc/hosts`:
-  `104.16.123.96 api.trycloudflare.com`. Named tunnels are unaffected (management goes
-  via `api.cloudflare.com`, data via `region{1,2}.v2.argotunnel.com` — both reachable).
-- QUIC (udp/7844) may be blocked too; the script forces `--protocol http2` (tcp/443).
-- WSL: the tunnel and backend die with the WSL VM. Before the judging window, start
-  `serve-public.sh` in a persistent session (`tmux`/`nohup`) and disable Windows sleep.
+  while `www.cloudflare.com` works. Workaround: pin `api.trycloudflare.com` to a
+  reachable Cloudflare edge IP in `/etc/hosts` (e.g. `104.16.123.96`). Named tunnels are
+  unaffected (management via `api.cloudflare.com`, data via
+  `region{1,2}.v2.argotunnel.com` — both reachable).
+- QUIC (udp/7844) may be blocked; the script forces `--protocol http2` (tcp/443).
+- WSL: the tunnel and backend die with the WSL VM — use `tmux`/`nohup` and disable
+  Windows sleep for the judging window.

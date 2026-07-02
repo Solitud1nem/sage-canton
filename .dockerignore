@@ -1,0 +1,15 @@
+# Keep the Fly build context tiny: only backend/ sources + frontend/ are needed.
+.git
+.daml
+daml
+daml-tests
+docs
+scripts
+log
+backend/node_modules
+backend/dist
+backend/.env
+backend/.env.*
+!backend/.env.example
+*.dar
+*.md
