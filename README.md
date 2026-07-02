@@ -126,13 +126,27 @@ A complete vertical slice, proven on a live Canton node:
   the requester/provider on App User. `scripts/cross_participant_external_demo.py`.
 - **TypeScript backend** — typed v2 JSON Ledger API + Amulet registry clients, REST API,
   idempotent automation (auto-expire / auto-settle).
-- **Demo UI** — fund → create → run agent → settle, with the worker's balance rising.
-- **Flagship agent pipeline** — the worker is an AI **research agent**; the arbiter is a
-  **paid fact-checker** that releases funds only if every citation resolves. Fabricated
-  sources → dispute → no payout. Real LLM with `ANTHROPIC_API_KEY`, offline fallback otherwise.
+- **Live on Seaport DevNet** — the whole slice (lifecycle, single-node privacy, **real Canton
+  Coin settlement**) runs on the hosted 5n-sandbox shared validator, reachable by judges. OIDC
+  m2m auth; the DAR vets on the public node. See `docs/setup/seaport-devnet-integration.md`.
+- **Demo UI** — fund → create → plan/delegate → settle, with agents' balances rising and a
+  perspective switcher for privacy.
+- **Flagship agent pipeline** — the worker is an AI **research agent** that does **real web
+  research** (Anthropic's server-side `web_search`, so citations are pages it actually
+  retrieved); the arbiter is a **paid fact-checker** that resolves every citation and honestly
+  distinguishes a real-but-blocked source (403/429) from a fabricated one (404/DNS-fail).
+  Fabricated/unverifiable sources → dispute → no payout. Offline deterministic fallback without a key.
+- **Dynamic decomposition (human-in-the-loop)** — the Sage killer feature: an orchestrator
+  proposes a plan (sub-tasks + reward split), the **requester reviews and edits it** (rewrite
+  briefs, reassign agents, adjust rewards, add/remove) before approving. Each sub-task becomes
+  its own on-ledger child `TaskEscrow` (linked via `parentRef`), privately scoped and settled on
+  its own → partial settlement (sound sub-tasks pay, fabricated refund).
+- **Specialised agents (on-ledger AgentRegistry)** — a roster of named, capability-tagged agents
+  (Web Researcher / Standards & Docs Specialist / Data Analyst) registered as on-ledger
+  `AgentProfile`s. Roles research **genuinely differently** (search scope/focus), not just by label.
 
-The Daml model, real settlement, backend, demo UI and the agent pipeline are all working
-end-to-end on a live node; remaining polish is deployment + presentation.
+The Daml model, real settlement, backend, demo UI, the agent pipeline and dynamic decomposition
+are all working end-to-end on the live Seaport DevNet node; remaining polish is presentation.
 
 ## Engineering reference
 
