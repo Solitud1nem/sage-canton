@@ -49,6 +49,10 @@ route('POST', '/tasks/:cid/accept', async (p, b) => svc.accept(p.cid!, b.worker)
 route('POST', '/tasks/:cid/complete', async (p, b) => svc.complete(p.cid!, b.worker, b.completionRef ?? ''));
 route('POST', '/tasks/:cid/approve', async (p, b) => svc.approve(p.cid!, b.requester));
 route('POST', '/tasks/:cid/expire', async (p, b) => svc.expire(p.cid!, b.provider));
+route('POST', '/tasks/:cid/dispute', async (p, b) => svc.dispute(p.cid!, b.raisedBy));
+// Status-only resolve — right for a dispute raised before settlement (nothing locked yet);
+// the value-moving siblings are /settle-resolve-refund and /settle-resolve-pay.
+route('POST', '/tasks/:cid/resolve', async (p, b) => svc.resolve(p.cid!, b.arbiter, !!b.payWorker));
 route('POST', '/tasks/:cid/settle', async (p, b) => {
   const esc = await svc.get(b.provider, p.cid!);
   if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
