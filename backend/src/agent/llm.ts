@@ -47,8 +47,13 @@ export async function researchWithSearch(system: string, prompt: string, opts: S
   const key = process.env.ANTHROPIC_API_KEY!;
   const messages: { role: string; content: unknown }[] = [{ role: 'user', content: prompt }];
   const blocks: any[] = [];
+  // Cost knobs (for cheap platform testing): RESEARCH_MAX_USES caps search rounds, RESEARCH_EFFORT
+  // sets thinking depth. Offline mode (no key) spends nothing at all — see research.ts.
+  const capUses = Number(process.env.RESEARCH_MAX_USES);
+  const maxUses = capUses > 0 ? Math.min(capUses, opts.maxUses ?? 4) : (opts.maxUses ?? 4);
+  const effort = process.env.RESEARCH_EFFORT || 'medium';
   // web_search_20260209 (dynamic filtering) needs Opus 4.8/4.7/4.6 or Sonnet 5/4.6.
-  const tool: Record<string, unknown> = { type: 'web_search_20260209', name: 'web_search', max_uses: opts.maxUses ?? 4 };
+  const tool: Record<string, unknown> = { type: 'web_search_20260209', name: 'web_search', max_uses: maxUses };
   if (opts.allowedDomains?.length) tool['allowed_domains'] = opts.allowedDomains;
   if (opts.blockedDomains?.length) tool['blocked_domains'] = opts.blockedDomains;
   const tools = [tool];
@@ -61,7 +66,7 @@ export async function researchWithSearch(system: string, prompt: string, opts: S
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST', signal: ctrl.signal,
         headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: RESEARCH_MODEL, max_tokens: 1500, system, messages, tools, output_config: { effort: 'medium' } }),
+        body: JSON.stringify({ model: RESEARCH_MODEL, max_tokens: 1500, system, messages, tools, output_config: { effort } }),
       });
       if (!res.ok) throw new Error(`anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
       json = (await res.json()) as { content: any[]; stop_reason: string };
