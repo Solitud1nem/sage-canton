@@ -256,7 +256,16 @@ function renderFeed(tasks) {
   if (!tops.length) {
     html += `<div class="hero"><div class="big">👇</div><h2>No tasks yet</h2><p>Give the agents their first task below.</p></div>`;
   } else {
-    html += tops.map((t) => taskEvents(t, kids[t.payload.taskRef]).join('')).join('');
+    // The ACTIVE work zone: the task whose plan is being edited, else the newest one.
+    // Everything older is dimmed and its buttons lose the primary green, so the eye
+    // lands on exactly one place.
+    const nowIdx = editingPlan ? tops.findIndex((x) => x.payload.taskRef === editingPlan) : tops.length - 1;
+    html += tops.map((t, i) => {
+      const inner = taskEvents(t, kids[t.payload.taskRef]).join('');
+      return i === nowIdx
+        ? `${tops.length > 1 ? '<div class="daysep cur">⚡ current task</div>' : ''}<div class="tgroup now">${inner}</div>`
+        : `<div class="tgroup old">${inner}</div>`;
+    }).join('');
     html += `<div class="privacy">🔒 An outsider looking at the same ledger sees <b>none</b> of this — no tasks, no prices, no counterparties. Switch to “outsider” above to see their view.</div>`;
   }
   feed.innerHTML = html;

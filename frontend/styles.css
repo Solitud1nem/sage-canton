@@ -92,6 +92,18 @@ details.plog ol { margin: 6px 0 0; padding-left: 20px; color: var(--muted); disp
 .subrow .cc { margin-left: auto; color: var(--accent); font-weight: 600; white-space: nowrap; }
 .subrow.bad .cc { color: var(--faint); }
 
+/* task groups: one glowing "current" zone, dimmed history above it */
+.tgroup { transition: opacity .2s; }
+.tgroup.old { opacity: .45; }
+.tgroup.old:hover { opacity: .95; }
+.tgroup.old .chips button.primary { background: var(--panel2); color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+.tgroup.old .chips button.primary:hover { border-color: var(--accent); color: var(--text); }
+.tgroup.now { background: #0f1620; border: 1px solid #1c3527; border-radius: 14px; margin: 4px 14px 8px; padding: 4px 0; }
+.tgroup.now .evt { padding-left: 18px; padding-right: 18px; }
+.tgroup.now .evt:hover { background: #131c28; }
+.daysep.cur { color: var(--accent); }
+.daysep.cur::before, .daysep.cur::after { background: #1c3527; }
+
 /* privacy strip */
 .privacy { margin: 8px 24px; padding: 10px 16px; border: 1px dashed #14401f; color: var(--accent); border-radius: 12px; font-size: 13.5px; }
 
