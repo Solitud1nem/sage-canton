@@ -430,23 +430,18 @@ async function executePlan(t) {
 }
 
 // ── composer ───────────────────────────────────────────────────────────────
+// Default flow: fund the task AND immediately show the orchestrator's plan for review.
+// Nothing runs until the requester approves (possibly after editing briefs/agents/rewards).
+// If planning fails, the task stays Created with its own Run/Plan chips in the feed.
 $('createBtn').onclick = async () => {
   const brief = $('brief').value.trim() || 'Summarise Canton Network privacy for settlement';
-  const btn = $('createBtn'); btn.disabled = true;
-  try {
-    await createTask(brief, $('amount').value || '100');
-    $('brief').value = '';
-    toast('Task funded — now run the agent on it ☝️');
-  } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
-};
-$('splitBtn').onclick = async () => {
-  const brief = $('brief').value.trim() || 'Summarise Canton Network privacy for settlement';
-  const btn = $('splitBtn'); btn.disabled = true;
+  const btn = $('createBtn'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span> planning…';
   try {
     const created = await createTask(brief, $('amount').value || '100');
     $('brief').value = '';
     await runPlan(created);
-  } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+    toast('Task funded — review the plan, edit if needed, then approve');
+  } catch (e) { toast(e.message, true); } finally { btn.disabled = false; btn.textContent = 'Fund & plan'; }
 };
 $('brief').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('createBtn').click(); });
 $('newSessionBtn').onclick = () => provision();
