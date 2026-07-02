@@ -266,3 +266,109 @@ testDisputeSettlementPaysWorker = do
   task.status === Paid
   WalletClient.checkBalanceApprox worker inst reward
   pure ()
+
+-- Status-only Approve must not strand a funded allocation: the requester approves
+-- (escrow -> Paid, no money moved), and the worker can STILL claim the funded
+-- allocation via SettlePayment, which is also allowed from Paid.
+testSettleAfterApprove : Script ()
+testSettleAfterApprove = do
+  registry <- AmuletRegistry.initialize AmuletRegistry.defaultAmuletRegistryConfig
+  provider  <- allocateParty "provider"
+  requester <- allocateParty "requester"
+  worker    <- allocateParty "worker"
+  arbiter   <- allocateParty "arbiter"
+
+  AmuletRegistry.featureApp registry provider
+  _ <- AmuletRegistry.tapFaucet registry requester 1000.0
+  now <- getTime
+  let inst   = registry.instrumentId
+      reward = 100.0
+      refId  = "settle-after-approve-001"
+
+  escrowCid <- submit (actAs [provider, requester]) do
+    createCmd TaskEscrow with
+      provider; requester; worker; arbiter
+      taskRef = refId; amount = reward; instrumentId = inst
+      status = Created; createdAt = now
+      deadline = now `addRelTime` seconds 3600; resultRef = None; parentRef = None
+  acceptedCid  <- submit worker do exerciseCmd escrowCid Accept
+  completedCid <- submit worker do exerciseCmd acceptedCid Complete with completionRef = "artifact-1"
+
+  -- requester funds the allocation while the task is Completed
+  [reqAlloc] <- WalletClient.listRequestedAllocations requester inst
+  holdingCids <- WalletClient.listHoldingCids requester inst
+  enriched <- RegistryApi.getAllocationFactory registry AllocationFactory_Allocate with
+    expectedAdmin    = registry.dso
+    allocation       = reqAlloc
+    requestedAt      = now
+    inputHoldingCids = holdingCids
+    extraArgs        = emptyExtraArgs
+  submitWithDisclosures' requester enriched.disclosures $
+    exerciseCmd enriched.factoryCid enriched.arg
+
+  -- requester approves WITHOUT moving money (status-only) -> Paid
+  approvedCid <- submit requester do exerciseCmd completedCid Approve
+
+  -- the worker can still claim the funded allocation from the Paid escrow
+  (allocCid, _) <- allocationForTask provider refId
+  ctx <- RegistryApi.getAllocation_TransferContext registry allocCid emptyMetadata
+  allocDisc <- queryDisclosure' provider (coerceContractId allocCid : ContractId AmuletAllocation)
+  settledCid <- submitWithDisclosures' worker (ctx.disclosures <> allocDisc) $
+    exerciseCmd approvedCid SettlePayment with
+      allocationCid = allocCid
+      extraArgs = ExtraArgs with context = ctx.choiceContext, meta = emptyMetadata
+
+  Some task <- queryContractId provider settledCid
+  task.status === Paid
+  WalletClient.checkBalanceApprox worker inst reward
+  pure ()
+
+-- Cross-escrow guard: a value-moving choice on escrow A must REJECT an allocation that
+-- was funded for escrow B (same requester). Without the allocation-match check the
+-- requester's signatory authority on A would suffice to withdraw B's lock while marking
+-- A refunded — desynchronizing both escrows.
+testRefundRejectsForeignAllocation : Script ()
+testRefundRejectsForeignAllocation = do
+  registry <- AmuletRegistry.initialize AmuletRegistry.defaultAmuletRegistryConfig
+  provider  <- allocateParty "provider"
+  requester <- allocateParty "requester"
+  worker    <- allocateParty "worker"
+  arbiter   <- allocateParty "arbiter"
+
+  _ <- AmuletRegistry.tapFaucet registry requester 1000.0
+  now <- getTime
+  let inst = registry.instrumentId
+      refA = "foreign-alloc-a"
+      refB = "foreign-alloc-b"
+      mkTask ref amt = TaskEscrow with
+        provider; requester; worker; arbiter
+        taskRef = ref; amount = amt; instrumentId = inst
+        status = Created; createdAt = now
+        deadline = now `addRelTime` seconds 3600; resultRef = None; parentRef = None
+
+  escrowACid <- submit (actAs [provider, requester]) do createCmd (mkTask refA 50.0)
+  _escrowBCid <- submit (actAs [provider, requester]) do createCmd (mkTask refB 100.0)
+
+  -- fund escrow B's allocation only
+  reqs <- WalletClient.listRequestedAllocations requester inst
+  reqB <- case [r | r <- reqs, r.settlement.settlementRef.id == refB] of
+    [r] -> pure r
+    _   -> abort "expected exactly one allocation request for escrow B"
+  holdingCids <- WalletClient.listHoldingCids requester inst
+  enriched <- RegistryApi.getAllocationFactory registry AllocationFactory_Allocate with
+    expectedAdmin    = registry.dso
+    allocation       = reqB
+    requestedAt      = now
+    inputHoldingCids = holdingCids
+    extraArgs        = emptyExtraArgs
+  submitWithDisclosures' requester enriched.disclosures $
+    exerciseCmd enriched.factoryCid enriched.arg
+
+  -- refunding escrow A while pointing at B's allocation must fail (allocation mismatch;
+  -- the assert fires before any Allocation_Withdraw, so no registry context is needed)
+  (allocBCid, _) <- allocationForTask requester refB
+  submitMustFail requester do
+    exerciseCmd escrowACid SettleRefund with
+      allocationCid = allocBCid
+      extraArgs = emptyExtraArgs
+  pure ()

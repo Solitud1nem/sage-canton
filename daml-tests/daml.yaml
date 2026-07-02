@@ -10,7 +10,7 @@
 sdk-version: 3.4.11
 name: sage-canton-tests
 source: Tests
-version: 0.2.0
+version: 0.2.1
 dependencies:
   - daml-prim
   - daml-stdlib
@@ -18,7 +18,7 @@ dependencies:
 data-dependencies:
   # the production package under test (built first by multi-package). Keep this version in
   # sync with daml.yaml's `version` when it bumps.
-  - ../.daml/dist/sage-canton-0.2.0.dar
+  - ../.daml/dist/sage-canton-0.2.1.dar
   # CIP-0056 token-standard interfaces (the tests import several directly)
   - ../daml/vendor/splice-api-token-metadata-v1-1.0.0.dar
   - ../daml/vendor/splice-api-token-holding-v1-1.0.0.dar

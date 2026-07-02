@@ -48,6 +48,7 @@ template AgentProfile
     choice Deactivate : ContractId AgentProfile
       controller agent
       do
+        assertMsg "profile is already inactive" active
         create this with active = False
 
     -- | Registry operator removes a profile entirely.

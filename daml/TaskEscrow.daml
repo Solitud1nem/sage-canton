@@ -36,6 +36,20 @@ import Splice.Api.Token.AllocationRequestV1
 taskPaymentLegId : Text
 taskPaymentLegId = "taskPayment"
 
+-- | Assert that a funded allocation is EXACTLY the one this escrow requested (same
+-- transfer leg and same settlement info). Every value-moving choice must run this before
+-- touching the allocation: the escrow's signatories contribute requester/provider
+-- authority to the allocation exercise, so without this check a choice on escrow A could
+-- act on an allocation funded for escrow B (same requester) — settling/refunding the
+-- wrong lock and desynchronizing both escrows' states.
+assertAllocationMatches : TaskEscrow -> ContractId Allocation -> Update ()
+assertAllocationMatches escrow allocationCid = do
+  allocView <- fmap (view @Allocation) (fetch allocationCid)
+  let reqView     = view (toInterface @AllocationRequest escrow)
+      expectedLeg = fromSome (TextMap.lookup taskPaymentLegId reqView.transferLegs)
+  expectedLeg        === allocView.allocation.transferLeg
+  reqView.settlement === allocView.allocation.settlement
+
 -- | Lifecycle states, mirroring the Sage EVM TaskEscrow enum.
 data TaskStatus
   = Created    -- ^ funded, awaiting a worker
@@ -131,31 +145,38 @@ template TaskEscrow
     -- suffices. The requester's protection before settlement is `Dispute`. `extraArgs`
     -- carries the registry's off-ledger transfer choice-context (disclosures supplied
     -- alongside at submission time).
+    --
+    -- Also claimable from Paid: the status-only Approve / Resolve(payWorker=True) flip the
+    -- escrow to Paid WITHOUT moving money, which would otherwise strand a funded allocation
+    -- (and the worker's earned payment) with no way to execute it. A double claim is not a
+    -- concern: each execution consumes the allocation, and only the requester (the
+    -- allocation sender) can fund one, so a second matching allocation cannot be created
+    -- against the requester's will.
     choice SettlePayment : ContractId TaskEscrow
       with
         allocationCid : ContractId Allocation
         extraArgs     : ExtraArgs
       controller worker
       do
-        assertMsg "task must be Completed" (status == Completed)
-        allocView <- fmap (view @Allocation) (fetch allocationCid)
-        let reqView      = view (toInterface @AllocationRequest this)
-            expectedLeg  = fromSome (TextMap.lookup taskPaymentLegId reqView.transferLegs)
+        assertMsg "task must be Completed or Paid" (status == Completed || status == Paid)
         -- the funded allocation must match exactly what this escrow requested
-        expectedLeg          === allocView.allocation.transferLeg
-        reqView.settlement   === allocView.allocation.settlement
+        assertAllocationMatches this allocationCid
         _ <- exercise allocationCid (Allocation_ExecuteTransfer with extraArgs)
         create this with status = Paid
 
     -- | Refund a funded-but-unaccepted/expired task: the requester (allocation sender)
-    -- withdraws the locked allocation and the escrow becomes Refunded.
+    -- withdraws the locked allocation and the escrow becomes Refunded. Also usable from
+    -- Refunded, so an allocation stranded by a status-only Refund / Resolve(payWorker=False)
+    -- can still be reclaimed.
     choice SettleRefund : ContractId TaskEscrow
       with
         allocationCid : ContractId Allocation
         extraArgs     : ExtraArgs
       controller requester
       do
-        assertMsg "refundable only from Created or Expired" (status == Created || status == Expired)
+        assertMsg "refundable only from Created, Expired or Refunded"
+          (status == Created || status == Expired || status == Refunded)
+        assertAllocationMatches this allocationCid
         _ <- exercise allocationCid (Allocation_Withdraw with extraArgs)
         create this with status = Refunded
 
@@ -171,6 +192,7 @@ template TaskEscrow
       controller arbiter
       do
         assertMsg "must be Disputed" (status == Disputed)
+        assertAllocationMatches this allocationCid
         _ <- exercise allocationCid (Allocation_Withdraw with extraArgs)
         create this with status = Refunded
 
@@ -186,11 +208,7 @@ template TaskEscrow
       controller arbiter, worker
       do
         assertMsg "must be Disputed" (status == Disputed)
-        allocView <- fmap (view @Allocation) (fetch allocationCid)
-        let reqView      = view (toInterface @AllocationRequest this)
-            expectedLeg  = fromSome (TextMap.lookup taskPaymentLegId reqView.transferLegs)
-        expectedLeg          === allocView.allocation.transferLeg
-        reqView.settlement   === allocView.allocation.settlement
+        assertAllocationMatches this allocationCid
         _ <- exercise allocationCid (Allocation_ExecuteTransfer with extraArgs)
         create this with status = Paid
 
