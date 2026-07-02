@@ -69,7 +69,16 @@ export class AgentRunner {
     let esc = await this.svc.accept(escrow.contractId, t.worker);
     const role = this.roles.get(t.worker) ?? 'web';
     log.push(`agent accepted ${t.taskRef} [role: ${role}]`);
-    const result = await research(theBrief, role);
+    // A research failure (LLM outage, timeout) must not strand the escrow in Accepted:
+    // complete with an empty result instead — the fact-check then fails ("no citations")
+    // and the normal dispute/refund path drives the escrow to a terminal state.
+    let result: ResearchResult;
+    try {
+      result = await research(theBrief, role);
+    } catch (e) {
+      result = { answer: `research failed: ${(e as Error).message}`.slice(0, 300), citations: [], live: false };
+      log.push('research errored — completing with no citations so the fact-check fails and the task refunds');
+    }
     this.store.get(t.taskRef)!.result = result;
     const resultHash = hash(JSON.stringify(result));
     log.push(`agent produced ${result.citations.length} citation(s) [${result.live ? 'live LLM' : 'offline'}]`);
@@ -134,11 +143,19 @@ export class AgentRunner {
       }
     }
 
-    // roll the parent up (status-only — the money moved in the children): accept -> complete -> approve
+    // roll the parent up (status-only — the money moved in the children): accept -> complete,
+    // then approve if at least one sub-task delivered; if EVERY sub-task failed, drive the
+    // parent through dispute -> refund instead, so it doesn't read "Paid" on-ledger when
+    // nothing was paid.
     let p = await this.svc.accept(parent.contractId, t.worker);
     const rollupHash = hash(JSON.stringify(subtasks.map((s) => s.resultHash)));
     p = await this.svc.complete(p.contractId, t.worker, rollupHash);
-    p = await this.svc.approve(p.contractId, t.requester);
+    if (subtasks.some((s) => s.outcome === 'paid')) {
+      p = await this.svc.approve(p.contractId, t.requester);
+    } else {
+      p = await this.svc.dispute(p.contractId, t.requester);
+      p = await this.svc.resolve(p.contractId, t.arbiter, false);
+    }
 
     const decomposition: Decomposition = { subtasks: items.map((s) => ({ title: s.title, brief: s.brief, reward: s.reward })), live: true };
     const paidTotal = subtasks.reduce(

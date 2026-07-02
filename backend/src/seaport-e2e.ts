@@ -4,7 +4,7 @@
 //   3. drive create -> accept -> complete -> approve (status-only, NO settlement — that's Q2);
 //   4. prove single-participant privacy: worker sees 1, outsider sees 0.
 // Run (LEDGER_TARGET=seaport-devnet in backend/.env): npx tsx src/seaport-e2e.ts
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { config } from './config.js';
@@ -15,7 +15,12 @@ import { currentUserId } from './jwt.js';
 if (config.target !== 'seaport-devnet') { console.error('set LEDGER_TARGET=seaport-devnet in backend/.env'); process.exit(2); }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const darPath = join(here, '..', '..', '.daml', 'dist', 'sage-canton-0.2.0.dar');
+// Pick the newest built prod DAR (excludes sage-canton-tests-*), so a version bump in
+// daml.yaml doesn't leave this script uploading a stale package.
+const dist = join(here, '..', '..', '.daml', 'dist');
+const darName = readdirSync(dist).filter((f) => /^sage-canton-\d.*\.dar$/.test(f)).sort().at(-1);
+if (!darName) throw new Error(`no sage-canton DAR in ${dist} — run: dpm build --all`);
+const darPath = join(dist, darName);
 
 const ledger = new LedgerClient();
 // EscrowService uses a RegistryClient only in settlement paths; the lifecycle choices we
@@ -28,7 +33,7 @@ async function main(): Promise<void> {
   // 1. upload the prod DAR (idempotent: KNOWN_PACKAGE_VERSION is tolerated)
   const dar = readFileSync(darPath);
   await ledger.uploadDar(dar);
-  console.log('DAR uploaded  ', `sage-canton-0.2.0 (${(dar.length / 1024).toFixed(0)} KiB), pkg ${config.packageId.slice(0, 16)}…`);
+  console.log('DAR uploaded  ', `${darName} (${(dar.length / 1024).toFixed(0)} KiB), pkg ${config.packageId.slice(0, 16)}…`);
 
   // 2. allocate parties + grant the m2m user CanActAs for them
   const sfx = Math.random().toString(36).slice(2, 8);

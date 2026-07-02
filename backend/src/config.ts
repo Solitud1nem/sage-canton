@@ -29,6 +29,7 @@ export interface Config {
   packageId: string;      // sage-canton main package id (used to qualify create/exercise commands)
   packageName: string;    // sage-canton package NAME (used to qualify ACS/query template filters)
   port: number;           // REST API port
+  apiToken: string;       // if set, all mutating REST routes require `Authorization: Bearer <apiToken>`
   // Pre-provisioned party ids (Seaport: filled after the party model is decided; §5).
   parties: { provider: string; requester: string; worker: string; arbiter: string };
 }
@@ -58,10 +59,12 @@ const localnet: Config = {
   auth: { mode: 'self-mint', secret: env('AUTH_SECRET', 'unsafe'), audience: env('AUTH_AUDIENCE', 'https://canton.network.global') },
   adminUser: env('ADMIN_USER', 'ledger-api-user'),
   walletUser: env('WALLET_USER', 'app-user'),
-  // sage-canton 0.1.4 main package (rebuild + update if the contract changes; or set via env)
-  packageId: env('PACKAGE_ID', '56c051ce4524277126bbaa0191a754a18e2e50e7dd17454ab8ae78caad584d18'),
+  // sage-canton 0.2.1 main package (rebuild + update if the contract changes; or set via env).
+  // 0.2.1 is an SCU-compatible upgrade of 0.2.0 — upload the new DAR before pointing here.
+  packageId: env('PACKAGE_ID', '018c4f4dfb322c4e6c24e8cc734b302a3c84b022a4778f71010f3e09be80661e'),
   packageName: env('PACKAGE_NAME', 'sage-canton'),
   port: Number(env('PORT', '8088')),
+  apiToken: env('API_TOKEN', ''),
   parties,
 };
 
@@ -89,9 +92,10 @@ const seaport: Config = {
   // The m2m user acts as our parties; override if the shared validator uses a different user id.
   adminUser: env('ADMIN_USER', 'validator-devnet-m2m'),
   walletUser: env('WALLET_USER', ''),
-  packageId: env('PACKAGE_ID', '56c051ce4524277126bbaa0191a754a18e2e50e7dd17454ab8ae78caad584d18'),
+  packageId: env('PACKAGE_ID', '018c4f4dfb322c4e6c24e8cc734b302a3c84b022a4778f71010f3e09be80661e'),
   packageName: env('PACKAGE_NAME', 'sage-canton'),
   port: Number(env('PORT', '8088')),
+  apiToken: env('API_TOKEN', ''),
   parties,
 };
 

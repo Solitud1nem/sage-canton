@@ -52,6 +52,10 @@ route('POST', '/tasks/:cid/expire', async (p, b) => svc.expire(p.cid!, b.provide
 route('POST', '/tasks/:cid/settle', async (p, b) => {
   const esc = await svc.get(b.provider, p.cid!);
   if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
+  // Guard here, not just on-ledger: SettlePayment is also exercisable from Paid (to rescue a
+  // status-only Approve), and this backend can act as the requester — so without this check a
+  // repeated call would fund + execute a SECOND allocation (double payment).
+  if (esc.payload.status !== 'Completed') throw new HttpError(409, `escrow is ${esc.payload.status}, settle requires Completed`);
   return svc.settle(esc);
 });
 // Value-moving dispute resolution (escrow must already be Disputed): the arbiter returns
@@ -59,12 +63,14 @@ route('POST', '/tasks/:cid/settle', async (p, b) => {
 route('POST', '/tasks/:cid/settle-resolve-refund', async (p, b) => {
   const esc = await svc.get(b.provider, p.cid!);
   if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
+  if (esc.payload.status !== 'Disputed') throw new HttpError(409, `escrow is ${esc.payload.status}, resolve requires Disputed`);
   return svc.settleResolveRefund(esc);
 });
 // Value-moving dispute resolution: the arbiter rules for the worker, who is paid for real.
 route('POST', '/tasks/:cid/settle-resolve-pay', async (p, b) => {
   const esc = await svc.get(b.provider, p.cid!);
   if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
+  if (esc.payload.status !== 'Disputed') throw new HttpError(409, `escrow is ${esc.payload.status}, resolve requires Disputed`);
   return svc.settleResolvePayWorker(esc);
 });
 route('POST', '/admin/tap', async (_p, b) => { await tap(String(b.amount ?? '1000.0')); return { tapped: b.amount ?? '1000.0', party: await walletParty() }; });
@@ -88,6 +94,11 @@ route('POST', '/agent/execute/:cid', async (p, b) => {
   const esc = await svc.get(b.provider, p.cid!);
   if (!esc) throw new HttpError(404, 'escrow not found / not visible to provider');
   if (!Array.isArray(b.subtasks) || b.subtasks.length === 0) throw new HttpError(400, 'subtasks[] required');
+  // Enforce the budget server-side (the UI shows a running total, but must not be trusted).
+  const rewards = b.subtasks.map((s: { reward?: unknown }) => Number(s?.reward));
+  if (rewards.some((r: number) => !Number.isFinite(r) || r < 0)) throw new HttpError(400, 'each subtask needs a finite non-negative reward');
+  const total = rewards.reduce((s: number, r: number) => s + r, 0);
+  if (total > Number(esc.payload.amount) + 1e-9) throw new HttpError(400, `plan total ${total} CC exceeds the parent budget ${esc.payload.amount} CC`);
   return runner.executePlan(esc, b.subtasks);
 });
 // Demo provisioning: requester = the wallet party; allocate the other roles + an outsider
@@ -143,10 +154,18 @@ const server = http.createServer((req, res) => {
     const m = routes.find((r) => r.method === req.method && r.re.test(url.pathname));
     if (!m) { if (req.method === 'GET') return serveStatic(url.pathname, res); res.writeHead(404, cors); return res.end('{"error":"not found"}'); }
     const send = (code: number, obj: unknown) => { res.writeHead(code, { 'Content-Type': 'application/json', ...cors }); res.end(JSON.stringify(obj)); };
+    // Optional shared-token gate for a publicly reachable deployment: every mutating route
+    // needs `Authorization: Bearer $API_TOKEN` (the UI forwards it from ?token=…). This
+    // backend holds CanActAs for all demo parties, so an open POST surface is god-mode.
+    if (config.apiToken && req.method !== 'GET' && req.headers.authorization !== `Bearer ${config.apiToken}`) {
+      return send(401, { error: 'missing or wrong API token (open the UI with ?token=…)' });
+    }
     const match = url.pathname.match(m.re)!;
     const params = Object.fromEntries(m.keys.map((k, i) => [k, decodeURIComponent(match[i + 1]!)]));
+    let body: unknown = {};
+    try { body = raw ? JSON.parse(raw) : {}; } catch { return send(400, { error: 'invalid JSON body' }); }
     try {
-      send(200, await m.fn(params, raw ? JSON.parse(raw) : {}, url));
+      send(200, await m.fn(params, body, url));
     } catch (e) {
       send(e instanceof HttpError ? e.code : 500, { error: (e as Error).message });
     }

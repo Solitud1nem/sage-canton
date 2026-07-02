@@ -1,6 +1,6 @@
 // Core escrow orchestration: TaskEscrow lifecycle + CIP-0056 settlement over the ledger.
 import { ALLOCATION_INSTRUCTION_PKG, config } from './config.js';
-import { LedgerClient, createdBySuffix, type Command, type CreatedEvent } from './ledger.js';
+import { LedgerClient, createdBySuffix, type Command, type CreatedEvent, type Transaction } from './ledger.js';
 import { RegistryClient } from './registry.js';
 import type { ContractId, EscrowContract, InstrumentId, Party, TaskEscrow } from './types.js';
 import { emptyMeta } from './types.js';
@@ -20,6 +20,10 @@ export interface CreateTaskParams {
 export class EscrowService {
   private readonly te: string;       // package-id qualified — for create/exercise commands
   private readonly teQuery: string;  // package-name qualified — for ACS/query template filters
+  // Escrows with a settlement currently in flight. Funding + settling is two ledger round
+  // trips; without this guard a double click (or a race with Automation.autoSettle) funds a
+  // SECOND allocation that stays locked until its allocateBefore/settleBefore expires.
+  private readonly inFlight = new Set<ContractId>();
   constructor(
     packageId: string,
     private readonly ledger = new LedgerClient(),
@@ -46,33 +50,33 @@ export class EscrowService {
       status: 'Created', createdAt, deadline, resultRef: null, parentRef: p.parentRef ?? null,
     };
     const tx = await this.ledger.submit([{ CreateCommand: { templateId: this.te, createArguments: args as unknown as Record<string, unknown> } }], [p.provider, p.requester]);
-    return this.created(tx.events && createdBySuffix(tx, TE_SUFFIX)!);
+    return this.created(tx);
   }
 
   async accept(cid: ContractId, worker: Party): Promise<EscrowContract> {
     const tx = await this.ledger.submit([this.exercise(cid, 'Accept')], [worker]);
-    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
+    return this.created(tx);
   }
   async complete(cid: ContractId, worker: Party, completionRef: string): Promise<EscrowContract> {
     const tx = await this.ledger.submit([this.exercise(cid, 'Complete', { completionRef })], [worker]);
-    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
+    return this.created(tx);
   }
   async approve(cid: ContractId, requester: Party): Promise<EscrowContract> {
     const tx = await this.ledger.submit([this.exercise(cid, 'Approve')], [requester]);
-    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
+    return this.created(tx);
   }
   async expire(cid: ContractId, provider: Party): Promise<EscrowContract> {
     const tx = await this.ledger.submit([this.exercise(cid, 'Expire')], [provider]);
-    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
+    return this.created(tx);
   }
   async dispute(cid: ContractId, raisedBy: Party): Promise<EscrowContract> {
     const tx = await this.ledger.submit([this.exercise(cid, 'Dispute', { raisedBy })], [raisedBy]);
-    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
+    return this.created(tx);
   }
   /** Arbiter resolves a dispute: pay the worker or refund the requester (status only). */
   async resolve(cid: ContractId, arbiter: Party, payWorker: boolean): Promise<EscrowContract> {
     const tx = await this.ledger.submit([this.exercise(cid, 'Resolve', { payWorker })], [arbiter]);
-    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
+    return this.created(tx);
   }
 
   /** All TaskEscrows visible to a party. */
@@ -90,8 +94,10 @@ export class EscrowService {
    * the Paid escrow. Mirrors scripts/live_settlement_demo.py.
    */
   async settle(escrow: EscrowContract): Promise<EscrowContract> {
-    const allocEv = await this.fundAllocation(escrow.payload);
-    return this.settleAllocation(escrow.contractId, 'SettlePayment', allocEv, 'execute-transfer', [escrow.payload.worker]);
+    return this.locked(escrow.contractId, async () => {
+      const allocEv = await this.fundAllocation(escrow.payload);
+      return this.settleAllocation(escrow.contractId, 'SettlePayment', allocEv, 'execute-transfer', [escrow.payload.worker]);
+    });
   }
 
   /**
@@ -102,8 +108,10 @@ export class EscrowService {
    * blob) at withdraw time.
    */
   async settleResolveRefund(escrow: EscrowContract): Promise<EscrowContract> {
-    const allocEv = await this.fundAllocation(escrow.payload);
-    return this.settleAllocation(escrow.contractId, 'SettleResolveRefund', allocEv, 'withdraw', [escrow.payload.arbiter]);
+    return this.locked(escrow.contractId, async () => {
+      const allocEv = await this.fundAllocation(escrow.payload);
+      return this.settleAllocation(escrow.contractId, 'SettleResolveRefund', allocEv, 'withdraw', [escrow.payload.arbiter]);
+    });
   }
 
   /**
@@ -112,8 +120,17 @@ export class EscrowService {
    * Disputed. Jointly authorized by [arbiter, worker]: the arbiter rules, the worker claims.
    */
   async settleResolvePayWorker(escrow: EscrowContract): Promise<EscrowContract> {
-    const allocEv = await this.fundAllocation(escrow.payload);
-    return this.settleAllocation(escrow.contractId, 'SettleResolvePayWorker', allocEv, 'execute-transfer', [escrow.payload.arbiter, escrow.payload.worker]);
+    return this.locked(escrow.contractId, async () => {
+      const allocEv = await this.fundAllocation(escrow.payload);
+      return this.settleAllocation(escrow.contractId, 'SettleResolvePayWorker', allocEv, 'execute-transfer', [escrow.payload.arbiter, escrow.payload.worker]);
+    });
+  }
+
+  /** Serialize value-moving operations per escrow: reject a second settle while one is in flight. */
+  private async locked<T>(cid: ContractId, fn: () => Promise<T>): Promise<T> {
+    if (this.inFlight.has(cid)) throw new Error(`settlement already in progress for ${cid.slice(0, 16)}…`);
+    this.inFlight.add(cid);
+    try { return await fn(); } finally { this.inFlight.delete(cid); }
   }
 
   /** Fund the escrow's payment leg: the requester locks `amount` of the instrument into a
@@ -152,15 +169,21 @@ export class EscrowService {
     kind: 'execute-transfer' | 'withdraw', actAs: Party[],
   ): Promise<EscrowContract> {
     const tc = await this.registry.allocationChoiceContext(allocEv.contractId, kind);
-    const disclosed = [...tc.disclosed, { templateId: allocEv.templateId, contractId: allocEv.contractId, createdEventBlob: allocEv.createdEventBlob!, synchronizerId: tc.disclosed[0]!.synchronizerId }];
+    const synchronizerId = tc.disclosed[0]?.synchronizerId;
+    if (!synchronizerId) throw new Error(`registry returned no disclosed contracts for ${kind} (cannot determine synchronizer id)`);
+    if (!allocEv.createdEventBlob) throw new Error('allocation created event has no createdEventBlob (was includeCreatedEventBlob set?)');
+    const disclosed = [...tc.disclosed, { templateId: allocEv.templateId, contractId: allocEv.contractId, createdEventBlob: allocEv.createdEventBlob, synchronizerId }];
     const tx = await this.ledger.submit(
       [this.exercise(escrowCid, choice, { allocationCid: allocEv.contractId, extraArgs: { context: tc.context, meta: emptyMeta() } })],
       actAs, disclosed,
     );
-    return this.created(createdBySuffix(tx, TE_SUFFIX)!);
+    return this.created(tx);
   }
 
-  private created(ce: { contractId: ContractId; createArgument?: Record<string, unknown> }): EscrowContract {
+  /** The TaskEscrow created by this transaction — with a clear error instead of a `!` crash. */
+  private created(tx: Transaction): EscrowContract {
+    const ce = createdBySuffix(tx, TE_SUFFIX);
+    if (!ce) throw new Error('transaction produced no TaskEscrow created event (check template filters / party visibility)');
     return { contractId: ce.contractId, payload: ce.createArgument as unknown as TaskEscrow };
   }
 }

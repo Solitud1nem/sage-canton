@@ -39,7 +39,10 @@ export class Automation {
           if ((this.opts.autoExpire !== false) && this.isOverdue(e, now)) {
             await this.svc.expire(e.contractId, this.opts.provider); expired++;
             this.opts.log?.(`expired ${e.payload.taskRef}`);
-          } else if (this.opts.autoSettle && e.payload.status === 'Completed') {
+          // Past the deadline the allocation window (allocateBefore) is closed and the
+          // registry would reject the funding — skip instead of retrying every tick forever.
+          } else if (this.opts.autoSettle && e.payload.status === 'Completed'
+                     && Date.parse(e.payload.deadline) > now) {
             await this.svc.settle(e); settled++;
             this.opts.log?.(`settled ${e.payload.taskRef} -> worker paid ${e.payload.amount}`);
           }
