@@ -128,9 +128,11 @@ function renderTasks(tasks) {
   }
   const kids = {};
   tasks.forEach((t) => { if (t.payload.parentRef) (kids[t.payload.parentRef] ||= []).push(t); });
-  const tops = tasks.filter((t) => !t.payload.parentRef);
+  // Top-level tasks, newest first — a freshly created/planned task lands at the top.
+  const tops = tasks.filter((t) => !t.payload.parentRef)
+    .sort((a, b) => Date.parse(b.payload.createdAt) - Date.parse(a.payload.createdAt));
 
-  box.innerHTML = tops.map((t) => {
+  const card = (t) => {
     const p = t.payload;
     const editing = editingPlan === p.taskRef;
     const acts = editing ? [] : actionsFor(t);
@@ -144,7 +146,13 @@ function renderTasks(tasks) {
         `<button class="tiny ${a[2] ? 'primary' : ''}" data-cid="${t.contractId}" data-i="${i}">${a[0]}</button>`).join('')}</div>` : ''}
       ${editing ? planEditorHtml(t) : reportHtml(reports[p.taskRef]) + decompHtml(decomps[p.taskRef], kids[p.taskRef])}
     </div>`;
-  }).join('') || `<div class="empty">No tasks from this perspective.</div>`;
+  };
+
+  if (!tops.length) { box.innerHTML = `<div class="empty">No tasks from this perspective.</div>`; return; }
+  const [latest, ...prev] = tops;
+  box.innerHTML =
+    `<div class="lane"><div class="lane-head">Latest task</div>${card(latest)}</div>` +
+    (prev.length ? `<div class="lane prev"><div class="lane-head">Previous tasks · ${prev.length}</div>${prev.map(card).join('')}</div>` : '');
 
   box.querySelectorAll('.actions button').forEach((b) => {
     const t = tops.find((x) => x.contractId === b.dataset.cid);

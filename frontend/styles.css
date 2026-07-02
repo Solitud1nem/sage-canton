@@ -58,7 +58,12 @@ button.tiny { padding: 6px 11px; font-size: 13px; }
 
 .count { background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; font-size: 13px; color: var(--muted); }
 .bal { font-size: 13px; color: var(--accent); font-weight: 600; }
-.tasks { display: grid; gap: 12px; margin-top: 14px; }
+.tasks { display: grid; gap: 18px; margin-top: 14px; }
+.lane { display: grid; gap: 12px; }
+.lane-head { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+.lane.prev { border-top: 1px solid var(--line); padding-top: 16px; }
+.lane.prev .task { opacity: .78; transition: opacity .15s; }
+.lane.prev .task:hover { opacity: 1; }
 .task { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
 .task .top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .task .ref { font-weight: 600; }
