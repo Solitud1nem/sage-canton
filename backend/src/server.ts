@@ -161,7 +161,10 @@ const server = http.createServer((req, res) => {
     // Optional shared-token gate for a publicly reachable deployment: every mutating route
     // needs `Authorization: Bearer $API_TOKEN` (the UI forwards it from ?token=…). This
     // backend holds CanActAs for all demo parties, so an open POST surface is god-mode.
-    if (config.apiToken && req.method !== 'GET' && req.headers.authorization !== `Bearer ${config.apiToken}`) {
+    // Loopback connections are exempt — local dev talks straight to localhost, while on a
+    // public host (Fly, tunnel) requests arrive via the proxy's non-loopback address.
+    const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
+    if (config.apiToken && !loopback && req.method !== 'GET' && req.headers.authorization !== `Bearer ${config.apiToken}`) {
       return send(401, { error: 'missing or wrong API token (open the UI with ?token=…)' });
     }
     const match = url.pathname.match(m.re)!;

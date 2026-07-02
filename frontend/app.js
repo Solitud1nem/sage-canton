@@ -5,7 +5,7 @@
 const API = location.origin; // backend serves this page, so same origin
 // Optional API token for a publicly hosted backend (API_TOKEN env): open the UI once with
 // ?token=… — it is stored locally, stripped from the URL, and sent on every mutating call.
-const TOKEN = (() => {
+let TOKEN = (() => {
   const q = new URLSearchParams(location.search).get('token');
   if (q) { localStorage.setItem('sage_token', q); history.replaceState(null, '', location.pathname); }
   return q || localStorage.getItem('sage_token') || '';
@@ -42,6 +42,11 @@ async function api(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json().catch(() => ({}));
+  // Token got lost (cleared site data, fresh browser)? Ask for it once and retry.
+  if (res.status === 401 && /API token/i.test(json.error || '')) {
+    const t = window.prompt('This deployment is token-gated. Paste the API token (from the ?token=… link):');
+    if (t) { TOKEN = t.trim(); localStorage.setItem('sage_token', TOKEN); return api(method, path, body); }
+  }
   if (!res.ok) throw new Error(json.error || `${method} ${path} ${res.status}`);
   return json;
 }
