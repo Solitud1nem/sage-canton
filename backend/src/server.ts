@@ -171,6 +171,7 @@ const server = http.createServer((req, res) => {
     try {
       send(200, await m.fn(params, body, url));
     } catch (e) {
+      if (!(e instanceof HttpError)) console.error(`[api] ${req.method} ${url.pathname}:`, (e as Error).message);
       send(e instanceof HttpError ? e.code : 500, { error: (e as Error).message });
     }
   });

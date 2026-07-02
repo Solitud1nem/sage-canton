@@ -131,9 +131,11 @@ details.plog ol { margin: 6px 0 0; padding-left: 20px; color: var(--muted); disp
 /* ── toast / spinner ────────────────────────────────────────────── */
 .toast { position: fixed; bottom: 86px; left: 50%; transform: translateX(-50%) translateY(20px);
   background: var(--panel2); border: 1px solid var(--accent); color: var(--text); padding: 11px 18px;
-  border-radius: 10px; opacity: 0; pointer-events: none; transition: .25s; max-width: 90vw; z-index: 10; }
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  border-radius: 10px; opacity: 0; pointer-events: none; transition: .25s; max-width: 90vw; z-index: 10;
+  user-select: text; cursor: pointer; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
 .toast.err { border-color: var(--red); }
+.toast.err::after { content: "click to copy"; display: block; margin-top: 4px; font-size: 11px; color: var(--faint); }
 .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid #0003; border-top-color: currentColor; border-radius: 50%; animation: s .7s linear infinite; vertical-align: -2px; }
 @keyframes s { to { transform: rotate(360deg); } }
 

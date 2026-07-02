@@ -46,12 +46,20 @@ async function api(method, path, body) {
   return json;
 }
 
+let toastTimer;
 function toast(msg, err = false) {
   const t = $('toast');
   t.textContent = msg;
   t.className = 'toast show' + (err ? ' err' : '');
-  setTimeout(() => (t.className = 'toast'), 4200);
+  clearTimeout(toastTimer);
+  // errors stick around and are click-to-copy (ledger errors are long and worth pasting)
+  toastTimer = setTimeout(() => (t.className = 'toast'), err ? 20000 : 4200);
 }
+$('toast').onclick = async () => {
+  const t = $('toast');
+  try { await navigator.clipboard.writeText(t.textContent); toast('copied to clipboard'); }
+  catch { t.className = 'toast'; }
+};
 
 async function health() {
   try {
