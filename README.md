@@ -48,15 +48,23 @@ Created/Accepted ──▶ Expired ──Refund──▶ Refunded
 Settlement is **wired and working** via the CIP-0056 Allocation (DvP) primitive: `TaskEscrow`
 implements the `AllocationRequest` interface, and `SettlePayment` exercises
 `Allocation_ExecuteTransfer` so funds move atomically with the status flip to Paid;
-`SettleRefund` withdraws on reclaim. Disputes settle for real too: `SettleResolveRefund`
-returns the locked funds to the requester (arbiter-controlled withdraw), and
-`SettleResolvePayWorker` pays the worker (jointly authorized by arbiter + worker, since the
-transfer needs the receiver's authority). We code against the `splice-api-token-*-v1`
-**interfaces only**, so the instrument is configuration — **Amulet (Canton Coin)** on
-LocalNet, **USDCx** on Test/MainNet (a one-line switch; see
+`SettleRefund` withdraws on reclaim. Every value-moving choice first verifies the passed
+allocation is exactly the one this escrow requested (same transfer leg + settlement info),
+so an allocation funded for one escrow can never settle or refund another. Disputes settle
+for real too: `SettleResolveRefund` returns the locked funds to the requester
+(arbiter-controlled withdraw), and `SettleResolvePayWorker` pays the worker (jointly
+authorized by arbiter + worker, since the transfer needs the receiver's authority). We code
+against the `splice-api-token-*-v1` **interfaces only**, so the instrument is configuration —
+**Amulet (Canton Coin)** on LocalNet, **USDCx** on Test/MainNet (a one-line switch; see
 [ADR-0017](docs/adr/0017-settlement-via-cip0056-token-standard.md)). Proven both in Daml
 Script (mock registry) and **end-to-end on a live cn-quickstart node** (the worker's real
 Canton Coin balance increases on settlement; a disputed task returns the locked funds).
+
+Funding model (demo): the escrow publishes its `AllocationRequest` from creation, but the
+backend funds the allocation at settlement time — nothing is locked while work is in
+progress, which is also why a failed fact-check has nothing to claw back. Locking funds at
+creation (true up-front escrow) needs no contract change — the requester's wallet just funds
+the request earlier — and is the natural production hardening.
 
 ## Repo layout
 
@@ -86,7 +94,7 @@ sage-canton/
 # 1. Daml model + tests (incl. real-token settlement on a mock Amulet registry)
 #    multi-package: the production DAR (daml/) and the Script tests (daml-tests/) are
 #    separate, so the uploaded DAR carries only the CIP-0056 interfaces (no test bloat).
-dpm install && dpm build --all && dpm test --package-root daml-tests   # 14 scripts green
+dpm install && dpm build --all && dpm test --package-root daml-tests   # 16 scripts green
 
 # 2. Live end-to-end on a real node (multi-validator + Canton Coin + wallet)
 #    bring up cn-quickstart LocalNet, then settle a TaskEscrow over HTTP:
@@ -106,7 +114,7 @@ verified LocalNet bring-up + the live-settlement runbook.
 
 A complete vertical slice, proven on a live Canton node:
 
-- **Daml model** — `TaskEscrow` lifecycle + CIP-0056 settlement; 14 Daml-Script tests green.
+- **Daml model** — `TaskEscrow` lifecycle + CIP-0056 settlement; 16 Daml-Script tests green.
 - **Real settlement** — worker paid in actual Canton Coin via the Allocation/DvP flow,
   on a live cn-quickstart node (USDCx is a config switch — [ADR-0017](docs/adr/0017-settlement-via-cip0056-token-standard.md)).
 - **Privacy, demonstrated** — a non-stakeholder party sees **0** escrows on the live ledger
