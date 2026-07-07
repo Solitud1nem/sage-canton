@@ -418,7 +418,7 @@ async function runPlan(t) {
 }
 
 function workerOptions(sel) {
-  return (session.agents || []).map((a) => `<option value="${esc(a.party)}" ${a.party === sel ? 'selected' : ''}>${esc(a.name)} · ${esc(a.pricing)} CC</option>`).join('');
+  return (session.agents || []).map((a) => `<option value="${esc(a.party)}" ${a.party === sel ? 'selected' : ''}>${esc(a.name)} · ${esc(fmtCC(a.pricing))} CC</option>`).join('');
 }
 
 // Read-only plan card: what each specialist gets and for how much. Approval happens
