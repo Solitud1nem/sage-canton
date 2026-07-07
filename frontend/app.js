@@ -12,7 +12,10 @@ let TOKEN = (() => {
 })();
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task-' + Math.random().toString(36).slice(2, 7);
+// taskRef must be UNIQUE: the UI keys plans/reports/children by it, and two briefs with the
+// same first 40 chars would collide (approving a plan against the wrong, already-settled
+// escrow). Hence the random suffix.
+const slug = (s) => (s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 36) || 'task') + '-' + Math.random().toString(36).slice(2, 6);
 const hhmm = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 // Ledger decimals come back as "33.3400000000"; float sums as 186.65999999999997.
 // Normalise both to at most 4 clean decimals for display.
@@ -268,6 +271,16 @@ function taskEvents(t, kids) {
     out.push(evt('orch', '🧩', 'Orchestrator', ref, '',
       `Split across <b>${dec.subtasks.length}</b> specialist${dec.subtasks.length === 1 ? '' : 's'} — <b>${paid} paid</b> · ${cc(dec.paidTotal)} to agents. Each sub-task was its own private escrow, settled on its own.`,
       `<div class="card">${rows}</div>`));
+    if (dec.synthesis) {
+      const s = dec.synthesis;
+      const head = s.answer.length > 220 ? s.answer.slice(0, 220) + '…' : s.answer;
+      const cites = s.citations.map((u) => `<div class="cite ok"><span class="ck">✓</span><a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a></div>`).join('');
+      out.push(evt('sage', '📋', 'Final report', ref, '',
+        `One answer, merged from the <b>${paid}</b> verified sub-answer${paid === 1 ? '' : 's'} — every source below is fact-checked.`,
+        `<div class="sub">“${esc(head)}”</div>` +
+        `<details class="more" data-k="syn:${esc(ref)}"><summary>full report · ${s.citations.length} verified sources</summary>` +
+        `<div class="answer">${esc(s.answer)}</div><div class="card">${cites}</div></details>`));
+    }
     return out;
   }
   if (kids?.length) {

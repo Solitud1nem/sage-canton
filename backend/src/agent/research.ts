@@ -46,7 +46,22 @@ const SYSTEM_STUB =
   'You are a meticulous research agent. Respond as strict JSON: ' +
   '{"answer": string, "citations": string[]} where each citation is a full https URL that resolves.';
 
+// Demo trigger, live or offline: a brief flagged "unverifiable"/"fabricated"/"hallucinated"
+// simulates a DISHONEST agent — it cites a source it never retrieved. Everything downstream
+// stays real: the fact-checker honestly fails to resolve it, and the on-ledger dispute →
+// refund is genuine. (A live model asked for something nonexistent would honestly decline
+// and cite real pages — good behaviour, but then the failure path could never be shown on
+// demand, which is the whole point of the trigger.)
+export const UNVERIFIABLE = /unverifiable|fabricat|hallucinat/i;
+
 export async function research(brief: string, role: RoleKey = 'web'): Promise<ResearchResult> {
+  if (UNVERIFIABLE.test(brief)) {
+    return {
+      answer: `Findings for: ${brief.slice(0, 140)} — key claims rest on an internal source that cannot be independently retrieved.`,
+      citations: ['https://nonexistent-source.invalid/whitepaper'],
+      live: false,
+    };
+  }
   if (provider() !== 'off') {
     const cfg = ROLES[role] ?? ROLES.web;
     const r = await researchWithSearch(cfg.system, brief, cfg.opts);

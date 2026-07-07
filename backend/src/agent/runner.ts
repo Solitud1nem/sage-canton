@@ -9,9 +9,10 @@
 import { createHash } from 'node:crypto';
 import type { EscrowContract } from '../types.js';
 import { EscrowService } from '../escrow.js';
-import { research, type ResearchResult, type RoleKey } from './research.js';
+import { research, UNVERIFIABLE, type ResearchResult, type RoleKey } from './research.js';
 import { factCheck, type Verdict } from './factcheck.js';
 import { decompose, type Decomposition } from './orchestrator.js';
+import { complete } from './llm.js';
 import type { Party } from '../types.js';
 
 export interface TaskReport {
@@ -27,10 +28,17 @@ export interface TaskReport {
   log: string[];
 }
 
+export interface SynthesisReport {
+  answer: string;      // ONE coherent report merged from the VERIFIED sub-answers only
+  citations: string[]; // union of the fact-checked (resolving) citations
+  live: boolean;       // merged by a live LLM vs deterministic concatenation
+}
+
 export interface DecompositionReport {
   taskRef: string;                 // parent task ref
   decomposition: Decomposition;    // the sub-task plan (titles + reward split)
   subtasks: TaskReport[];          // one per child escrow, in order
+  synthesis?: SynthesisReport;     // final report (present when at least one sub-task paid)
   paidTotal: string;               // sum of rewards actually paid to the worker
   status: string;                  // parent escrow rollup status
 }
@@ -123,15 +131,21 @@ export class AgentRunner {
   async executePlan(parent: EscrowContract, items: PlanItem[]): Promise<DecompositionReport> {
     const t = parent.payload;
     const subtasks: TaskReport[] = [];
+    // A parent brief flagged "unverifiable" must fail ON DEMAND even when the live planner
+    // produced clean sub-briefs: propagate the trigger into the last sub-task (mirrors the
+    // offline heuristic, which plants it in one sub-task deliberately).
+    const parentBrief = this.store.get(t.taskRef)?.brief ?? t.taskRef;
+    const propagateFlag = UNVERIFIABLE.test(parentBrief) && !items.some((s) => UNVERIFIABLE.test(s.brief));
     for (const [i, sub] of items.entries()) {
       const childRef = `${t.taskRef}/sub-${i + 1}`;
       const worker = sub.worker || t.worker;
+      const childBrief = propagateFlag && i === items.length - 1 ? `${sub.brief} [unverifiable]` : sub.brief;
       try {
         const child = await this.svc.createTask({
           provider: t.provider, requester: t.requester, worker, arbiter: t.arbiter,
           taskRef: childRef, amount: sub.reward, instrumentId: t.instrumentId, parentRef: t.taskRef,
         });
-        const rep = await this.run(child, sub.brief);
+        const rep = await this.run(child, childBrief);
         subtasks.push({ ...rep, title: sub.title });
       } catch (e) {
         subtasks.push({
@@ -143,12 +157,17 @@ export class AgentRunner {
       }
     }
 
+    // Final synthesis: merge the VERIFIED (paid) sub-answers into ONE report the requester
+    // can actually use — the pipeline's tangible product. Only fact-checked findings and
+    // their resolving citations go in; failed sub-tasks contribute nothing.
+    const synthesis = await this.synthesize(parentBrief, subtasks);
+
     // roll the parent up (status-only — the money moved in the children): accept -> complete,
     // then approve if at least one sub-task delivered; if EVERY sub-task failed, drive the
     // parent through dispute -> refund instead, so it doesn't read "Paid" on-ledger when
     // nothing was paid.
     let p = await this.svc.accept(parent.contractId, t.worker);
-    const rollupHash = hash(JSON.stringify(subtasks.map((s) => s.resultHash)));
+    const rollupHash = hash(JSON.stringify([...subtasks.map((s) => s.resultHash), synthesis?.answer ?? '']));
     p = await this.svc.complete(p.contractId, t.worker, rollupHash);
     if (subtasks.some((s) => s.outcome === 'paid')) {
       p = await this.svc.approve(p.contractId, t.requester);
@@ -160,7 +179,29 @@ export class AgentRunner {
     const decomposition: Decomposition = { subtasks: items.map((s) => ({ title: s.title, brief: s.brief, reward: s.reward })), live: true };
     const paidTotal = subtasks.reduce(
       (sum, s, i) => (s.outcome === 'paid' ? sum + Number(items[i]!.reward) : sum), 0);
-    return { taskRef: t.taskRef, decomposition, subtasks, paidTotal: paidTotal.toFixed(4), status: p.payload.status };
+    return { taskRef: t.taskRef, decomposition, subtasks, synthesis, paidTotal: paidTotal.toFixed(4), status: p.payload.status };
+  }
+
+  /** Merge the paid (verified) sub-answers into one report; deterministic concat when no
+   *  live LLM is available or the merge call fails — the pipeline result must never be
+   *  lost to a synthesis hiccup. Returns undefined when nothing was verified. */
+  private async synthesize(parentBrief: string, subtasks: TaskReport[]): Promise<SynthesisReport | undefined> {
+    const paid = subtasks.filter((s) => s.outcome === 'paid');
+    if (!paid.length) return undefined;
+    const citations = [...new Set(paid.flatMap((s) => s.result.citations))];
+    const sections = paid.map((s) => `## ${s.title ?? s.taskRef}\n${s.result.answer}`).join('\n\n');
+    const merged = () => paid.map((s) => `${s.title ?? s.taskRef}: ${s.result.answer}`).join('\n\n');
+    try {
+      const { text, live } = await complete(
+        'You merge already-verified research findings into ONE coherent, concise report that directly ' +
+        'answers the original question. Use ONLY the findings provided — no new claims, no new sources. ' +
+        'Plain text, no JSON, no preamble.',
+        `Question: ${parentBrief}\n\nVerified findings:\n\n${sections}`,
+      );
+      return { answer: (live ? text : merged()).slice(0, 4000), citations, live };
+    } catch {
+      return { answer: merged().slice(0, 4000), citations, live: false };
+    }
   }
 
   /** Plan + execute with the orchestrator's default assignment (all sub-tasks to the parent's
