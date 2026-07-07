@@ -4,7 +4,7 @@
 //
 // Agents are specialised (registered in the AgentRegistry with capabilities): each role runs a
 // GENUINELY different search — different scope and focus — not just a different label.
-import { complete, researchWithSearch, type SearchOpts } from './llm.js';
+import { complete, provider, researchWithSearch, type SearchOpts } from './llm.js';
 
 export type RoleKey = 'web' | 'docs' | 'analyst';
 
@@ -47,7 +47,7 @@ const SYSTEM_STUB =
   '{"answer": string, "citations": string[]} where each citation is a full https URL that resolves.';
 
 export async function research(brief: string, role: RoleKey = 'web'): Promise<ResearchResult> {
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (provider() !== 'off') {
     const cfg = ROLES[role] ?? ROLES.web;
     const r = await researchWithSearch(cfg.system, brief, cfg.opts);
     return { answer: r.answer.slice(0, 2000), citations: r.citations, live: r.live };

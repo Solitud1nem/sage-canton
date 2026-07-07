@@ -1,24 +1,63 @@
-// Minimal LLM client for the research agent. Uses the Anthropic Messages API when
-// ANTHROPIC_API_KEY is set; otherwise falls back to a deterministic stub so the pipeline
-// (and the e2e demo) runs without external credentials.
-const MODEL = process.env.LLM_MODEL ?? 'claude-opus-4-8';
-// The research agent uses web search, which is much faster on Sonnet 5 than Opus 4.8 while
-// still supporting the web_search_20260209 (dynamic-filtering) tool. Overridable via env.
-const RESEARCH_MODEL = process.env.RESEARCH_MODEL ?? 'claude-sonnet-5';
+// Minimal LLM client for the research agent, with a provider switch:
+//   - OpenAI (Responses API + built-in web_search)   — default when its key is present (cheap)
+//   - Anthropic (Messages API + server-side web_search)
+//   - deterministic offline stub when no key is set, so the pipeline (and the e2e demo)
+//     runs without external credentials.
+// LLM_PROVIDER=openai|anthropic forces a provider (given its key exists); otherwise the
+// first available key wins, OpenAI first — it is an order of magnitude cheaper per run.
+
+export type Provider = 'openai' | 'anthropic' | 'off';
+
+export function provider(): Provider {
+  const forced = process.env.LLM_PROVIDER;
+  if (forced === 'openai' && process.env.OPENAI_API_KEY) return 'openai';
+  if (forced === 'anthropic' && process.env.ANTHROPIC_API_KEY) return 'anthropic';
+  if (process.env.OPENAI_API_KEY) return 'openai';
+  if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
+  return 'off';
+}
+
+// LLM_MODEL / RESEARCH_MODEL override the model FOR THE ACTIVE PROVIDER.
+// Anthropic research is pinned to models that support web_search_20260209 (dynamic
+// filtering): Opus 4.8/4.7/4.6 or Sonnet 5/4.6 — Haiku does not qualify. Planning has no
+// such constraint, so it rides the cheap tier on both providers.
+const model = (): string => process.env.LLM_MODEL ?? (provider() === 'openai' ? 'gpt-5-mini' : 'claude-haiku-4-5');
+const researchModel = (): string => process.env.RESEARCH_MODEL ?? (provider() === 'openai' ? 'gpt-5-mini' : 'claude-sonnet-5');
 
 export interface LlmResult { text: string; live: boolean; }
 
 export async function complete(system: string, prompt: string): Promise<LlmResult> {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return { text: fallback(prompt), live: false };
+  const prov = provider();
+  if (prov === 'off') return { text: fallback(prompt), live: false };
+  if (prov === 'openai') {
+    const res = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      // gpt-5* are reasoning models: keep effort low for plain synthesis and leave output
+      // headroom, since max_output_tokens also feeds the reasoning trace.
+      body: JSON.stringify({ model: model(), instructions: system, input: prompt, reasoning: { effort: 'low' }, max_output_tokens: 2000 }),
+    });
+    if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    return { text: outputText(await res.json()), live: true };
+  }
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: MODEL, max_tokens: 1024, system, messages: [{ role: 'user', content: prompt }] }),
+    headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY!, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: model(), max_tokens: 1024, system, messages: [{ role: 'user', content: prompt }] }),
   });
   if (!res.ok) throw new Error(`anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const json = (await res.json()) as { content: { text: string }[] };
   return { text: json.content.map((c) => c.text).join(''), live: true };
+}
+
+// Concatenate the output_text parts of an OpenAI Responses payload.
+function outputText(json: any): string {
+  const out: string[] = [];
+  for (const item of json.output ?? []) {
+    if (item.type !== 'message') continue;
+    for (const c of item.content ?? []) if (c.type === 'output_text' && c.text) out.push(c.text);
+  }
+  return out.join(' ');
 }
 
 // Deterministic offline stand-in. Returns plausible research JSON; for briefs flagged
@@ -35,8 +74,8 @@ function fallback(prompt: string): string {
   });
 }
 
-// Real research via Anthropic's server-side web_search tool: Claude actually searches the web,
-// and we harvest the URLs it retrieved/cited — real, resolvable sources the strict fact-checker
+// Real research via the provider's built-in web search: the model actually searches, and we
+// harvest the URLs it retrieved/cited — real, resolvable sources the strict fact-checker
 // then verifies honestly. No offline stub here; callers use `complete`'s fallback when no key.
 export interface SearchResult { answer: string; citations: string[]; live: boolean; }
 
@@ -44,14 +83,61 @@ export interface SearchResult { answer: string; citations: string[]; live: boole
 export interface SearchOpts { maxUses?: number; allowedDomains?: string[]; blockedDomains?: string[]; }
 
 export async function researchWithSearch(system: string, prompt: string, opts: SearchOpts = {}): Promise<SearchResult> {
-  const key = process.env.ANTHROPIC_API_KEY!;
-  const messages: { role: string; content: unknown }[] = [{ role: 'user', content: prompt }];
-  const blocks: any[] = [];
   // Cost knobs (for cheap platform testing): RESEARCH_MAX_USES caps search rounds, RESEARCH_EFFORT
   // sets thinking depth. Offline mode (no key) spends nothing at all — see research.ts.
   const capUses = Number(process.env.RESEARCH_MAX_USES);
   const maxUses = capUses > 0 ? Math.min(capUses, opts.maxUses ?? 4) : (opts.maxUses ?? 4);
   const effort = process.env.RESEARCH_EFFORT || 'medium';
+  return provider() === 'openai'
+    ? researchOpenai(system, prompt, opts, maxUses, effort)
+    : researchAnthropic(system, prompt, opts, maxUses, effort);
+}
+
+async function researchOpenai(system: string, prompt: string, opts: SearchOpts, maxUses: number, effort: string): Promise<SearchResult> {
+  // OpenAI's web_search filters support allowed domains but not blocked ones — the docs
+  // specialist's exclusions are enforced in the instructions AND by dropping any citation
+  // that slips through (below), so the agent differentiation stays real.
+  const tool: Record<string, unknown> = { type: 'web_search' };
+  if (opts.allowedDomains?.length) tool['filters'] = { allowed_domains: opts.allowedDomains };
+  const blocked = opts.blockedDomains ?? [];
+  const instructions = blocked.length
+    ? `${system} Never use, rely on, or cite these domains: ${blocked.join(', ')}.`
+    : system;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 220_000);
+  let json: any;
+  try {
+    const res = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model: researchModel(), instructions, input: prompt,
+        tools: [tool], max_tool_calls: maxUses,
+        reasoning: { effort }, max_output_tokens: 4000,
+      }),
+    });
+    if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    json = await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+  const answer = outputText(json).replace(/\s+/g, ' ').trim();
+  const cited = new Set<string>();
+  for (const item of json.output ?? []) {
+    if (item.type !== 'message') continue;
+    for (const c of item.content ?? []) {
+      for (const a of c.annotations ?? []) if (a.type === 'url_citation' && a.url) cited.add(a.url);
+    }
+  }
+  const isBlocked = (u: string) => blocked.some((d) => { try { return new URL(u).hostname.endsWith(d); } catch { return true; } });
+  const citations = [...cited].filter((u) => !isBlocked(u)).slice(0, 8);
+  return { answer: answer || '(no answer produced)', citations, live: true };
+}
+
+async function researchAnthropic(system: string, prompt: string, opts: SearchOpts, maxUses: number, effort: string): Promise<SearchResult> {
+  const key = process.env.ANTHROPIC_API_KEY!;
+  const messages: { role: string; content: unknown }[] = [{ role: 'user', content: prompt }];
+  const blocks: any[] = [];
   // web_search_20260209 (dynamic filtering) needs Opus 4.8/4.7/4.6 or Sonnet 5/4.6.
   const tool: Record<string, unknown> = { type: 'web_search_20260209', name: 'web_search', max_uses: maxUses };
   if (opts.allowedDomains?.length) tool['allowed_domains'] = opts.allowedDomains;
@@ -66,7 +152,7 @@ export async function researchWithSearch(system: string, prompt: string, opts: S
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST', signal: ctrl.signal,
         headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: RESEARCH_MODEL, max_tokens: 1500, system, messages, tools, output_config: { effort } }),
+        body: JSON.stringify({ model: researchModel(), max_tokens: 1500, system, messages, tools, output_config: { effort } }),
       });
       if (!res.ok) throw new Error(`anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
       json = (await res.json()) as { content: any[]; stop_reason: string };
@@ -93,4 +179,7 @@ export async function researchWithSearch(system: string, prompt: string, opts: S
   return { answer: answer || '(no answer produced)', citations, live: true };
 }
 
-export const llmMode = (): string => (process.env.ANTHROPIC_API_KEY ? `live (${MODEL})` : 'offline-fallback');
+export const llmMode = (): string => {
+  const prov = provider();
+  return prov === 'off' ? 'offline-fallback' : `live-${prov} (${researchModel()})`;
+};
