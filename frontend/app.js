@@ -173,17 +173,19 @@ function citesCard(checks) {
   return `<div class="card">${rows}</div>`;
 }
 
-function answerSub(rep) {
+// The data-k keys keep <details> open across the 4s poll re-render (renderFeed collects
+// the open ones before replacing innerHTML and re-opens them after).
+function answerSub(rep, ref) {
   const a = rep?.result?.answer || '';
   if (!a) return '';
   const head = a.length > 180 ? a.slice(0, 180) + '…' : a;
-  const full = a.length > 180 ? `<details class="more"><summary>full answer</summary><div class="answer">${esc(a)}</div></details>` : '';
+  const full = a.length > 180 ? `<details class="more" data-k="ans:${esc(ref)}"><summary>full answer</summary><div class="answer">${esc(a)}</div></details>` : '';
   return `<div class="sub">“${esc(head)}”</div>${full}`;
 }
 
-function logDetails(rep) {
+function logDetails(rep, ref) {
   if (!rep?.log?.length) return '';
-  return `<details class="plog"><summary>how it settled · ${rep.log.length} steps on-ledger</summary><ol>${rep.log.map((l) => `<li>${esc(l)}</li>`).join('')}</ol></details>`;
+  return `<details class="plog" data-k="log:${esc(ref)}"><summary>how it settled · ${rep.log.length} steps on-ledger</summary><ol>${rep.log.map((l) => `<li>${esc(l)}</li>`).join('')}</ol></details>`;
 }
 
 // Events for one top-level task (+ its decomposition children).
@@ -223,7 +225,7 @@ function taskEvents(t, kids) {
   // decomposition: plan under review / being edited / executed / children on-ledger
   if (editingPlanIs(ref)) {
     const plan = plans[ref];
-    const src = plan.live ? '🧠 planned by Claude' : '📦 offline plan';
+    const src = plan.live ? '🧠 live plan' : '📦 offline plan';
     if (plan.mode === 'edit') {
       out.push(evt('orch', '🧩', 'Orchestrator', ref, '', `Edit the plan — briefs, agents, rewards — then approve. ${src}`, planEditorHtml(t)));
     } else {
@@ -285,16 +287,16 @@ function taskEvents(t, kids) {
   }
   if (p.status === 'Completed') {
     const n = rep?.result?.citations?.length;
-    out.push(evt('agent', '🤖', name, ref, '', `Delivered the research${n ? ` — <b>${n}</b> sources cited` : ''}. Awaiting settlement.`, answerSub(rep) +
+    out.push(evt('agent', '🤖', name, ref, '', `Delivered the research${n ? ` — <b>${n}</b> sources cited` : ''}. Awaiting settlement.`, answerSub(rep, ref) +
       chips(my ? [chip(`💸 Pay the agent · ${fmtCC(p.amount)} CC`, true, () => act(t, 'settle', { provider: session.provider })),
                   chip('Dispute', false, () => act(t, 'dispute', { raisedBy: session.requester }))]
         : perspective === 'agents' ? [chip('💸 Claim payment', true, () => act(t, 'settle', { provider: session.provider }))] : [])));
     if (rep?.verdict) out.push(evt('checker', '⚖️', 'Fact-checker', ref, '', `<b>${rep.verdict.checks.filter((c) => c.ok).length} of ${rep.verdict.checks.length}</b> citations resolve.`, citesCard(rep.verdict.checks)));
   }
   if (p.status === 'Paid') {
-    out.push(evt('agent', '🤖', name, ref, '', `Delivered the research${rep ? ` — <b>${rep.result.citations.length}</b> sources cited` : ''}.`, answerSub(rep)));
+    out.push(evt('agent', '🤖', name, ref, '', `Delivered the research${rep ? ` — <b>${rep.result.citations.length}</b> sources cited` : ''}.`, answerSub(rep, ref)));
     if (rep?.verdict) out.push(evt('checker', '⚖️', 'Fact-checker', ref, '', `All <b>${rep.verdict.checks.length} of ${rep.verdict.checks.length}</b> citations resolve — work verified.`, citesCard(rep.verdict.checks)));
-    out.push(evt('money', '💸', 'Settlement', ref, '', `Agent paid ${cc(p.amount)} — real Canton Coin, moved atomically with the escrow closing.`, logDetails(rep)));
+    out.push(evt('money', '💸', 'Settlement', ref, '', `Agent paid ${cc(p.amount)} — real Canton Coin, moved atomically with the escrow closing.`, logDetails(rep, ref)));
   }
   if (p.status === 'Disputed') {
     out.push(evt('checker', '⚖️', 'Fact-checker', ref, '', `The result is <span class="neg">contested</span> — under arbiter review.`,
@@ -307,7 +309,7 @@ function taskEvents(t, kids) {
     out.push(evt('checker', '⚖️', 'Fact-checker', ref, '',
       bad?.length ? `Citation does <span class="neg">not resolve</span> — fabricated source. Task disputed, funds returned. <b>The agent got nothing.</b>`
                   : `Task refunded — <b>the agent got nothing.</b>`,
-      citesCard(bad) + logDetails(rep)));
+      citesCard(bad) + logDetails(rep, ref)));
   }
   if (p.status === 'Expired') {
     out.push(evt('gray', '⌛', 'Deadline', ref, '', 'The deadline passed before completion — task expired, nothing was paid.'));
@@ -322,6 +324,8 @@ function renderFeed(tasks) {
   lastTasks = tasks;
   const feed = $('feed');
   const nearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120;
+  // innerHTML replacement resets <details>; remember which keyed ones are open.
+  const openKeys = new Set([...feed.querySelectorAll('details[data-k][open]')].map((d) => d.dataset.k));
   ACTIONS = [];
 
   if (!session) { feed.innerHTML = heroStart(); const b = $('startBtn'); if (b) b.onclick = () => provision(b); return; }
@@ -349,6 +353,7 @@ function renderFeed(tasks) {
     html += `<div class="privacy">🔒 An outsider looking at the same ledger sees <b>none</b> of this — no tasks, no prices, no counterparties. Switch to “outsider” above to see their view.</div>`;
   }
   feed.innerHTML = html;
+  feed.querySelectorAll('details[data-k]').forEach((d) => { if (openKeys.has(d.dataset.k)) d.open = true; });
 
   feed.querySelectorAll('button[data-i]').forEach((b) => {
     const fn = ACTIONS[Number(b.dataset.i)];
