@@ -26,6 +26,8 @@ let lastTasks = [];
 let editingPlan = null;          // taskRef whose decomposition plan is being edited
 let refreshFailed = false;
 const briefs = {};               // taskRef -> research brief (off-ledger, UI-side)
+const running = {};              // taskRef -> sub-task count while the pipeline runs (0 = single agent)
+const fails = {};                // taskRef -> last pipeline error (cleared on retry)
 const reports = {};              // taskRef -> last agent TaskReport
 const decomps = {};              // parent taskRef -> last DecompositionReport
 const plans = {};                // parent taskRef -> editable plan { live, items[] }
@@ -191,13 +193,20 @@ function taskEvents(t, kids) {
   const my = perspective === 'my';
   const out = [];
 
+  const busy = ref in running; // pipeline in flight: hide action chips, show progress instead
   out.push(evt('me', '🧑', 'You', ref, when,
     `Funded a task for ${cc(p.amount)}: “${esc(brief)}”`,
-    p.status === 'Created' && !editingPlanIs(ref) ? chips(my ? [
+    p.status === 'Created' && !editingPlanIs(ref) && !busy ? chips(my ? [
       chip('🤖 Run agent', true, () => runAgent(t)),
       chip('🧩 Plan & delegate', false, () => runPlan(t)),
       ...(overdue(p) ? [chip('⌛ Expire', false, () => act(t, 'expire', { provider: session.provider }))] : []),
     ] : perspective === 'agents' ? [chip('Accept', true, () => act(t, 'accept', { worker: p.worker }))] : []) : ''));
+
+  // A pipeline run that died off-script (network, ledger error): say so — the action
+  // chips above are back, and a restored plan card (if any) allows a straight retry.
+  if (fails[ref] && !busy) {
+    out.push(evt('gray', '⚠️', 'Pipeline', ref, '', `<span class="neg">Run failed:</span> ${esc(fails[ref])} — nothing was paid; you can retry.`));
+  }
 
   // decomposition: plan under review / being edited / executed / children on-ledger
   if (editingPlanIs(ref)) {
@@ -217,6 +226,21 @@ function taskEvents(t, kids) {
           chip('✖ Discard', false, () => { editingPlan = null; delete plans[ref]; renderFeed(lastTasks); refresh(); }),
         ] : [])));
     }
+    return out;
+  }
+  // Pipeline in flight — live progress instead of a final-sounding summary. The child
+  // escrows appear on-ledger as they are created; the poller feeds them in here.
+  if (busy) {
+    const n = running[ref];
+    const rows = (kids || []).map((k) => {
+      const st = k.payload.status;
+      const done = st === 'Paid' || st === 'Refunded';
+      const mark = st === 'Paid' ? '✓' : st === 'Refunded' ? '✗' : '⋯';
+      return `<div class="subrow ${st === 'Paid' ? 'ok' : st === 'Refunded' ? 'bad' : ''}"><span class="ck">${mark}</span><b>${esc(k.payload.taskRef.split('/').pop())}</b><span class="who2">${esc(agentName(k.payload.worker))} · ${esc(st)}</span><span class="cc">${done ? (st === 'Paid' ? esc(fmtCC(k.payload.amount)) + ' CC' : 'not paid') : ''}</span></div>`;
+    }).join('');
+    out.push(evt('orch', '🧩', 'Orchestrator', ref, '',
+      `<span class="spin"></span> Working — ${n ? `<b>${n}</b> sub-task${n === 1 ? '' : 's'} delegated` : 'agent on the task'}: research → fact-check → settlement…`,
+      rows ? `<div class="card">${rows}</div>` : ''));
     return out;
   }
   const dec = decomps[ref];
@@ -356,13 +380,22 @@ async function act(t, verb, body) {
 }
 
 async function runAgent(t) {
+  const ref = t.payload.taskRef;
+  delete fails[ref];
+  running[ref] = 0;
+  renderFeed(lastTasks);
   try {
     toast('🤖 agent researching + fact-checking…');
-    const rep = await api('POST', `/agent/run/${encodeURIComponent(t.contractId)}`, { provider: session.provider, brief: briefs[t.payload.taskRef] });
-    reports[t.payload.taskRef] = rep;
+    const rep = await api('POST', `/agent/run/${encodeURIComponent(t.contractId)}`, { provider: session.provider, brief: briefs[ref] });
+    reports[ref] = rep;
     toast(rep.outcome === 'paid' ? `✅ verified — agent paid (${rep.verdict.summary})` : `⛔ ${rep.verdict.summary} → no payout`, rep.outcome !== 'paid');
+  } catch (e) {
+    fails[ref] = e.message;
+    toast(e.message, true);
+  } finally {
+    delete running[ref];
     await refresh();
-  } catch (e) { toast(e.message, true); }
+  }
 }
 
 async function createTask(brief, amount) {
@@ -478,17 +511,22 @@ async function executePlan(t) {
   const items = plans[ref].items;
   if (!items.length) { toast('add at least one sub-task', true); return; }
   editingPlan = null;
+  delete fails[ref];
+  running[ref] = items.length;
   renderFeed(lastTasks);
   try {
     toast(`🧩 delegating ${items.length} sub-task(s) — research + verification + settlement…`);
     const rep = await api('POST', `/agent/execute/${encodeURIComponent(t.contractId)}`, { provider: session.provider, subtasks: items });
     decomps[ref] = rep; delete plans[ref];
     const paid = rep.subtasks.filter((s) => s.outcome === 'paid').length;
-    toast(`🧩 ${rep.subtasks.length} sub-tasks done · ${paid} paid · ${rep.paidTotal} CC to agents`, paid === 0);
+    toast(`🧩 ${rep.subtasks.length} sub-tasks done · ${paid} paid · ${fmtCC(rep.paidTotal)} CC to agents`, paid === 0);
+    delete running[ref];
     await refresh();
   } catch (e) {
+    delete running[ref];
+    fails[ref] = e.message;
     toast(e.message, true);
-    editingPlan = ref; renderFeed(lastTasks); // restore the editor so nothing is lost
+    editingPlan = ref; renderFeed(lastTasks); // restore the plan card so approve can be retried
   }
 }
 
