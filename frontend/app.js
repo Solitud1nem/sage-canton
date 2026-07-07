@@ -14,7 +14,10 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'task-' + Math.random().toString(36).slice(2, 7);
 const hhmm = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
-const cc = (n) => `<span class="cc">${esc(String(n).replace(/\.0+$/, ''))} CC</span>`;
+// Ledger decimals come back as "33.3400000000"; float sums as 186.65999999999997.
+// Normalise both to at most 4 clean decimals for display.
+const fmtCC = (n) => { const v = Number(n); return Number.isFinite(v) ? String(+v.toFixed(4)) : String(n); };
+const cc = (n) => `<span class="cc">${esc(fmtCC(n))} CC</span>`;
 
 let session = JSON.parse(localStorage.getItem('sage_session_v1') || 'null');
 let perspective = 'my';          // 'my' | 'agents' | 'outsider'
@@ -126,6 +129,27 @@ function heroOutsider(count) {
   </div>`;
 }
 
+// First message from the platform when the session is fresh — instructions plus
+// one-click example tasks (clicking one prefills the composer below).
+function welcomeEvent() {
+  const examples = [
+    'Compare CIP-0056 allocations with ERC-20 approvals',
+    'What is sub-transaction privacy on Canton?',
+    'unverifiable: cite the 2031 Canton whitepaper',
+  ];
+  const tryChips = chips(examples.map((x) =>
+    chip(esc(x), false, () => { const b = $('brief'); b.value = x; b.focus(); })));
+  return evt('sage', '🌿', 'Sage', '', '',
+    `Your session is live on the Canton ledger — parties allocated, wallet funded with ${cc(1000)}.`,
+    `<div class="steps">
+      <div>1️⃣ Give the agents a task below — the orchestrator proposes a plan you review and approve.</div>
+      <div>2️⃣ Agents research it; an independent fact-checker verifies every citation.</div>
+      <div>3️⃣ Only verified work gets paid — in real Canton Coin, atomically.</div>
+      <div class="tips">🔒 Flip the perspective to <b>outsider</b> to watch privacy hold live · 💡 include “unverifiable” in a task to see bad work go unpaid.</div>
+    </div>
+    <div class="sub">Try one:</div>${tryChips}`);
+}
+
 const evt = (cls, icon, name, ref, when, msg, extra = '') => `
   <div class="evt ${cls}">
     <div class="who">${icon}</div>
@@ -175,9 +199,24 @@ function taskEvents(t, kids) {
       ...(overdue(p) ? [chip('⌛ Expire', false, () => act(t, 'expire', { provider: session.provider }))] : []),
     ] : perspective === 'agents' ? [chip('Accept', true, () => act(t, 'accept', { worker: p.worker }))] : []) : ''));
 
-  // decomposition: plan being edited / executed / children on-ledger
+  // decomposition: plan under review / being edited / executed / children on-ledger
   if (editingPlanIs(ref)) {
-    out.push(evt('orch', '🧩', 'Orchestrator', ref, '', `Proposed a plan — <b>this is what you'll pay for</b>. Edit briefs, reassign agents, adjust rewards, then approve. ${plans[ref].live ? '🧠 planned by Claude' : '📦 offline plan'}`, planEditorHtml(t)));
+    const plan = plans[ref];
+    const src = plan.live ? '🧠 planned by Claude' : '📦 offline plan';
+    if (plan.mode === 'edit') {
+      out.push(evt('orch', '🧩', 'Orchestrator', ref, '', `Edit the plan — briefs, agents, rewards — then approve. ${src}`, planEditorHtml(t)));
+    } else {
+      const total = plan.items.reduce((s, it) => s + (Number(it.reward) || 0), 0);
+      const over = total > Number(p.amount) + 1e-9;
+      out.push(evt('orch', '🧩', 'Orchestrator', ref, '',
+        `Proposed a plan — <b>this is what you'll pay for</b>. ${src}`,
+        planReviewHtml(t) + chips(my ? [
+          chip(`✅ Approve &amp; delegate (${total.toFixed(2)} CC)`, true, () =>
+            over ? (toast('plan is over budget — edit it first', true), (plan.mode = 'edit'), renderFeed(lastTasks)) : executePlan(t)),
+          chip('✏️ Edit plan', false, () => { plan.mode = 'edit'; renderFeed(lastTasks); }),
+          chip('✖ Discard', false, () => { editingPlan = null; delete plans[ref]; renderFeed(lastTasks); refresh(); }),
+        ] : [])));
+    }
     return out;
   }
   const dec = decomps[ref];
@@ -186,10 +225,10 @@ function taskEvents(t, kids) {
     const rows = dec.subtasks.map((s, i) => {
       const ok = s.outcome === 'paid';
       const reward = dec.decomposition.subtasks[i]?.reward || '';
-      return `<div class="subrow ${ok ? 'ok' : 'bad'}"><span class="ck">${ok ? '✓' : '✗'}</span><b>${esc(s.title || s.taskRef)}</b><span class="who2">${esc(s.verdict?.summary || '')}</span><span class="cc">${ok ? esc(reward) + ' CC' : 'not paid'}</span></div>`;
+      return `<div class="subrow ${ok ? 'ok' : 'bad'}"><span class="ck">${ok ? '✓' : '✗'}</span><b>${esc(s.title || s.taskRef)}</b><span class="who2">${esc(s.verdict?.summary || '')}</span><span class="cc">${ok ? esc(fmtCC(reward)) + ' CC' : 'not paid'}</span></div>`;
     }).join('');
     out.push(evt('orch', '🧩', 'Orchestrator', ref, '',
-      `Split across <b>${dec.subtasks.length}</b> specialists — <b>${paid} paid</b> · ${cc(dec.paidTotal)} to agents. Each sub-task was its own private escrow, settled on its own.`,
+      `Split across <b>${dec.subtasks.length}</b> specialist${dec.subtasks.length === 1 ? '' : 's'} — <b>${paid} paid</b> · ${cc(dec.paidTotal)} to agents. Each sub-task was its own private escrow, settled on its own.`,
       `<div class="card">${rows}</div>`));
     return out;
   }
@@ -197,9 +236,9 @@ function taskEvents(t, kids) {
     const paid = kids.filter((k) => k.payload.status === 'Paid').length;
     const rows = kids.map((k) => {
       const ok = k.payload.status === 'Paid';
-      return `<div class="subrow ${ok ? 'ok' : 'bad'}"><span class="ck">${ok ? '✓' : '✗'}</span><b>${esc(k.payload.taskRef.split('/').pop())}</b><span class="who2">${esc(agentName(k.payload.worker))} · ${esc(k.payload.status)}</span><span class="cc">${ok ? esc(k.payload.amount.replace(/\.0+$/, '')) + ' CC' : 'not paid'}</span></div>`;
+      return `<div class="subrow ${ok ? 'ok' : 'bad'}"><span class="ck">${ok ? '✓' : '✗'}</span><b>${esc(k.payload.taskRef.split('/').pop())}</b><span class="who2">${esc(agentName(k.payload.worker))} · ${esc(k.payload.status)}</span><span class="cc">${ok ? esc(fmtCC(k.payload.amount)) + ' CC' : 'not paid'}</span></div>`;
     }).join('');
-    out.push(evt('orch', '🧩', 'Orchestrator', ref, '', `Split across <b>${kids.length}</b> specialists — ${paid} paid.`, `<div class="card">${rows}</div>`));
+    out.push(evt('orch', '🧩', 'Orchestrator', ref, '', `Split across <b>${kids.length}</b> specialist${kids.length === 1 ? '' : 's'} — ${paid} paid.`, `<div class="card">${rows}</div>`));
     return out;
   }
 
@@ -211,7 +250,7 @@ function taskEvents(t, kids) {
   if (p.status === 'Completed') {
     const n = rep?.result?.citations?.length;
     out.push(evt('agent', '🤖', name, ref, '', `Delivered the research${n ? ` — <b>${n}</b> sources cited` : ''}. Awaiting settlement.`, answerSub(rep) +
-      chips(my ? [chip(`💸 Pay the agent · ${p.amount.replace(/\.0+$/, '')} CC`, true, () => act(t, 'settle', { provider: session.provider })),
+      chips(my ? [chip(`💸 Pay the agent · ${fmtCC(p.amount)} CC`, true, () => act(t, 'settle', { provider: session.provider })),
                   chip('Dispute', false, () => act(t, 'dispute', { raisedBy: session.requester }))]
         : perspective === 'agents' ? [chip('💸 Claim payment', true, () => act(t, 'settle', { provider: session.provider }))] : [])));
     if (rep?.verdict) out.push(evt('checker', '⚖️', 'Fact-checker', ref, '', `<b>${rep.verdict.checks.filter((c) => c.ok).length} of ${rep.verdict.checks.length}</b> citations resolve.`, citesCard(rep.verdict.checks)));
@@ -259,7 +298,8 @@ function renderFeed(tasks) {
 
   let html = `<div class="daysep">demo session · everything below is on the live ledger</div>`;
   if (!tops.length) {
-    html += `<div class="hero"><div class="big">👇</div><h2>No tasks yet</h2><p>Give the agents their first task below.</p></div>`;
+    // Sit the welcome message just above the composer, where the user is about to type.
+    html += `<div class="welcome-push">${welcomeEvent()}</div>`;
   } else {
     // The ACTIVE work zone: the task whose plan is being edited, else the newest one.
     // Everything older is dimmed and its buttons lose the primary green, so the eye
@@ -298,7 +338,7 @@ async function refresh() {
     const tasks = all.filter((t) => t.payload.provider === session.provider);
     renderFeed(tasks);
     const earned = bals.reduce((s, b) => s + (b.amulet || 0), 0);
-    $('earned').innerHTML = `agents earned <b>${earned} CC</b>`;
+    $('earned').innerHTML = `agents earned <b>${fmtCC(earned)} CC</b>`;
     refreshFailed = false;
   } catch (e) {
     if (!refreshFailed) toast(e.message, true);
@@ -339,7 +379,7 @@ async function runPlan(t) {
   try {
     toast('🧩 planning the decomposition…');
     const dec = await api('POST', `/agent/plan/${encodeURIComponent(t.contractId)}`, { provider: session.provider, brief: briefs[t.payload.taskRef] });
-    plans[t.payload.taskRef] = { live: dec.live, items: dec.subtasks.map((s) => ({ title: s.title, brief: s.brief, reward: String(s.reward), worker: session.worker })) };
+    plans[t.payload.taskRef] = { live: dec.live, mode: 'review', items: dec.subtasks.map((s) => ({ title: s.title, brief: s.brief, reward: String(s.reward), worker: session.worker })) };
     editingPlan = t.payload.taskRef;
     renderFeed(lastTasks);
   } catch (e) { toast(e.message, true); }
@@ -347,6 +387,24 @@ async function runPlan(t) {
 
 function workerOptions(sel) {
   return (session.agents || []).map((a) => `<option value="${esc(a.party)}" ${a.party === sel ? 'selected' : ''}>${esc(a.name)} · ${esc(a.pricing)} CC</option>`).join('');
+}
+
+// Read-only plan card: what each specialist gets and for how much. Approval happens
+// via chips next to it; the editor is one click away.
+function planReviewHtml(t) {
+  const plan = plans[t.payload.taskRef];
+  const budget = Number(t.payload.amount);
+  const total = plan.items.reduce((s, it) => s + (Number(it.reward) || 0), 0);
+  const over = total > budget + 1e-9;
+  const rows = plan.items.map((it) => `
+    <div class="prow">
+      <div class="pmain"><b>${esc(it.title)}</b>${it.brief ? `<div class="pbrief">${esc(it.brief)}</div>` : ''}</div>
+      <span class="who2">${esc(agentName(it.worker))}</span>
+      <span class="cc">${esc(String(it.reward))} CC</span>
+    </div>`).join('');
+  return `<div class="card">${rows}
+    <div class="pi-foot"><span class="pi-total ${over ? 'over' : ''}">total ${total.toFixed(2)} / ${budget.toFixed(0)} CC${over ? ' — over budget' : ''}</span></div>
+  </div>`;
 }
 
 function planEditorHtml(t) {
@@ -372,7 +430,7 @@ function planEditorHtml(t) {
       <button class="pi-add tiny">➕ add sub-task</button>
       <span class="pi-total ${over ? 'over' : ''}">total ${total.toFixed(2)} / ${budget.toFixed(0)} CC${over ? ' — over budget' : ''}</span>
       <span class="pi-run-group">
-        <button class="pi-cancel tiny">Cancel</button>
+        <button class="pi-cancel tiny">‹ Back</button>
         <button class="pi-run tiny primary" ${over ? 'disabled' : ''}>✅ Approve &amp; delegate (${total.toFixed(2)} CC)</button>
       </span>
     </div>
@@ -411,7 +469,8 @@ function bindPlanEditor(t) {
   }));
   root.querySelectorAll('.pi-del').forEach((b, i) => (b.onclick = () => { sync(); plans[ref].items.splice(i, 1); renderFeed(lastTasks); }));
   root.querySelector('.pi-add').onclick = () => { sync(); plans[ref].items.push({ title: 'New sub-task', brief: '', reward: '0', worker: session.worker }); renderFeed(lastTasks); };
-  root.querySelector('.pi-cancel').onclick = () => { editingPlan = null; delete plans[ref]; renderFeed(lastTasks); refresh(); };
+  // Back collapses the editor into the read-only review card, keeping the edits.
+  root.querySelector('.pi-cancel').onclick = () => { sync(); plans[ref].mode = 'review'; renderFeed(lastTasks); };
   root.querySelector('.pi-run').onclick = () => { sync(); executePlan(t); };
 }
 

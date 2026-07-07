@@ -38,7 +38,9 @@ h1 .on { color: var(--accent); }
 .earned b { color: var(--accent); }
 
 /* ── feed ───────────────────────────────────────────────────────── */
-.feed { flex: 1; overflow-y: auto; padding: 18px 0 12px; }
+.feed { flex: 1; overflow-y: auto; padding: 18px 0 12px; display: flex; flex-direction: column; }
+.feed > * { flex-shrink: 0; }
+.welcome-push { margin-top: auto; }
 .daysep { display: flex; align-items: center; gap: 12px; color: var(--faint); font-size: 12px; padding: 8px 24px; }
 .daysep::before, .daysep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
@@ -51,6 +53,7 @@ h1 .on { color: var(--accent); }
 .evt.money .who { border-color: var(--accent2); background: #0c2214; }
 .evt.orch .who { border-color: #2e2440; }
 .evt.gray .who { border-color: var(--line); }
+.evt.sage .who { border-color: var(--accent2); background: #0c2214; }
 .body { flex: 1; min-width: 0; }
 .line1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .name { font-weight: 650; font-size: 14px; }
@@ -59,6 +62,9 @@ h1 .on { color: var(--accent); }
 .evt.checker .name { color: var(--amber); }
 .evt.orch .name { color: var(--violet); }
 .evt.gray .name { color: var(--muted); }
+.evt.sage .name { color: var(--accent); }
+.steps { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; font-size: 14px; }
+.steps .tips { margin-top: 6px; color: var(--muted); font-size: 13px; }
 .eref { color: var(--faint); font-size: 12.5px; word-break: break-all; }
 .when { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; }
 .msg { margin-top: 2px; font-size: 14.5px; }
@@ -135,6 +141,12 @@ details.plog ol { margin: 6px 0 0; padding-left: 20px; color: var(--muted); disp
 .pi-side label input, .pi-side label select { min-width: 0; }
 .pi-del { flex: 0 0 auto; align-self: flex-end; color: var(--red); border-color: #3a1c1c; padding: 5px 10px; }
 .pi-del:hover { border-color: var(--red); }
+.prow { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; font-size: 13px; }
+.prow .pmain { flex: 1; min-width: 0; }
+.prow .pmain b { font-weight: 600; }
+.prow .pbrief { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+.prow .who2 { color: var(--muted); white-space: nowrap; }
+.prow .cc { color: var(--accent); font-weight: 600; white-space: nowrap; }
 .pi-foot { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
 .pi-total { font-size: 13px; color: var(--accent); font-weight: 600; }
 .pi-total.over { color: var(--amber); }
