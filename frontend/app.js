@@ -298,8 +298,7 @@ function renderFeed(tasks) {
 
   let html = `<div class="daysep">demo session · everything below is on the live ledger</div>`;
   if (!tops.length) {
-    // Sit the welcome message just above the composer, where the user is about to type.
-    html += `<div class="welcome-push">${welcomeEvent()}</div>`;
+    html += welcomeEvent();
   } else {
     // The ACTIVE work zone: the task whose plan is being edited, else the newest one.
     // Everything older is dimmed and its buttons lose the primary green, so the eye

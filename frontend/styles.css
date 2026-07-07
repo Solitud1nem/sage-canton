@@ -40,7 +40,9 @@ h1 .on { color: var(--accent); }
 /* ── feed ───────────────────────────────────────────────────────── */
 .feed { flex: 1; overflow-y: auto; padding: 18px 0 12px; display: flex; flex-direction: column; }
 .feed > * { flex-shrink: 0; }
-.welcome-push { margin-top: auto; }
+/* chat-style bottom anchoring: the session feed (its daysep always comes first) hugs
+   the composer while short, and grows upward as tasks accumulate */
+.feed > .daysep:first-child { margin-top: auto; }
 .daysep { display: flex; align-items: center; gap: 12px; color: var(--faint); font-size: 12px; padding: 8px 24px; }
 .daysep::before, .daysep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
