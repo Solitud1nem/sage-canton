@@ -110,6 +110,17 @@ export class LedgerClient {
     const { status, json } = await http('POST', `${this.base}/v2/users/${user}/rights`, { userId: user, rights, identityProviderId: '' });
     if (status !== 200) throw new LedgerError('grantActAs', status, json);
   }
+  async listActAs(user: string): Promise<Party[]> {
+    const { status, json } = await http('GET', `${this.base}/v2/users/${user}/rights`);
+    if (status !== 200) throw new LedgerError('listRights', status, json);
+    const rights: Array<{ kind: { CanActAs?: { value?: { party?: Party } } } }> = json.rights ?? [];
+    return rights.map((r) => r.kind.CanActAs?.value?.party).filter((p): p is Party => !!p);
+  }
+  async revokeActAs(user: string, parties: Party[]): Promise<void> {
+    const rights = parties.map((party) => ({ kind: { CanActAs: { value: { party } } } }));
+    const { status, json } = await http('PATCH', `${this.base}/v2/users/${user}/rights`, { userId: user, rights, identityProviderId: '' });
+    if (status !== 200) throw new LedgerError('revokeActAs', status, json);
+  }
 }
 
 export class LedgerError extends Error {

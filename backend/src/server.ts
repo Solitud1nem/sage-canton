@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, normalize, extname } from 'node:path';
 import { config } from './config.js';
-import { LedgerClient } from './ledger.js';
+import { LedgerClient, LedgerError } from './ledger.js';
 import { RegistryClient } from './registry.js';
 import { EscrowService } from './escrow.js';
 import { Automation } from './automation.js';
@@ -111,13 +111,34 @@ route('POST', '/admin/provision', async () => {
   const sfx = Math.random().toString(36).slice(2, 7);
   const requester = await walletParty();
   // A small pool of worker agents so a decomposition plan can assign sub-tasks to different ones.
+  // The `sage-` hint prefix marks these parties as OURS on the shared validator, so the
+  // rights-cap self-heal below can safely target stale sessions and nothing else.
   const [provider, workerA, workerB, workerC, arbiter, outsider] = await Promise.all([
-    ledger.allocateParty(`provider-${sfx}`), ledger.allocateParty(`agent-1-${sfx}`),
-    ledger.allocateParty(`agent-2-${sfx}`), ledger.allocateParty(`agent-3-${sfx}`),
-    ledger.allocateParty(`arbiter-${sfx}`), ledger.allocateParty(`outsider-${sfx}`),
+    ledger.allocateParty(`sage-provider-${sfx}`), ledger.allocateParty(`sage-agent-1-${sfx}`),
+    ledger.allocateParty(`sage-agent-2-${sfx}`), ledger.allocateParty(`sage-agent-3-${sfx}`),
+    ledger.allocateParty(`sage-arbiter-${sfx}`), ledger.allocateParty(`sage-outsider-${sfx}`),
   ]);
   const workers = [workerA, workerB, workerC];
-  await ledger.grantActAs(await currentUserId(), [requester, provider, ...workers, arbiter, outsider]);
+  // No grant for the outsider: it only ever READS (privacy perspective), and the API user
+  // holds CanReadAsAnyParty — every CanActAs slot counts against the participant's
+  // 1000-rights-per-user cap, which is shared by every team on the Seaport validator.
+  const user = await currentUserId();
+  const granted = [requester, provider, ...workers, arbiter];
+  try {
+    await ledger.grantActAs(user, granted);
+  } catch (e) {
+    if (!(e instanceof LedgerError) || (e.detail as { code?: string })?.code !== 'TOO_MANY_USER_RIGHTS') throw e;
+    // The shared user hit the participant's rights cap. Revoke OUR stale demo-session
+    // rights (sage-prefixed hints only — never another team's parties) and retry once.
+    const keep = new Set(granted);
+    const stale = (await ledger.listActAs(user)).filter(
+      (p) => /^sage-[a-z0-9-]+-[a-z0-9]{3,6}::/.test(p) && !keep.has(p),
+    );
+    if (stale.length === 0) throw e;
+    console.warn(`provision: rights cap hit — revoking ${stale.length} stale sage-* CanActAs and retrying`);
+    await ledger.revokeActAs(user, stale);
+    await ledger.grantActAs(user, granted);
+  }
   // Register each agent on-ledger (AgentRegistry) with a real specialisation, and tell the
   // runner which party plays which role so its sub-tasks research accordingly.
   const roster = AGENT_ROLES.map((role, i) => ({ party: workers[i]!, role }));
