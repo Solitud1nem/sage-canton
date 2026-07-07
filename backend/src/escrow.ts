@@ -15,7 +15,15 @@ export interface CreateTaskParams {
   taskRef: string; amount: string; instrumentId: InstrumentId;
   deadlineSeconds?: number; // default 1h
   parentRef?: string | null; // set for a decomposition sub-task (links it to its parent)
+  arbiterFee?: string | null; // per-verdict fee for the arbiter; default ARBITER_FEE env (2 CC)
 }
+
+// The fact-checker's per-verdict fee: paid on BOTH outcomes (paid/refunded), so the
+// referee has no economic reason to lean either way. '0' disables the fee leg entirely.
+const defaultArbiterFee = (): string | null => {
+  const fee = process.env.ARBITER_FEE ?? '2.0';
+  return Number(fee) > 0 ? fee : null;
+};
 
 export class EscrowService {
   private readonly te: string;       // package-id qualified — for create/exercise commands
@@ -48,6 +56,7 @@ export class EscrowService {
       provider: p.provider, requester: p.requester, worker: p.worker, arbiter: p.arbiter,
       taskRef: p.taskRef, amount: p.amount, instrumentId: p.instrumentId,
       status: 'Created', createdAt, deadline, resultRef: null, parentRef: p.parentRef ?? null,
+      arbiterFee: p.arbiterFee !== undefined ? p.arbiterFee : defaultArbiterFee(),
     };
     const tx = await this.ledger.submit([{ CreateCommand: { templateId: this.te, createArguments: args as unknown as Record<string, unknown> } }], [p.provider, p.requester]);
     return this.created(tx);
@@ -126,6 +135,20 @@ export class EscrowService {
     });
   }
 
+  /**
+   * Pay the arbiter's verification fee (both outcomes: the escrow must be Paid or
+   * Refunded). Funds the fee leg and has the ARBITER claim it via SettleArbiterFee.
+   * No-op when the escrow has no fee configured. Returns the (recreated) escrow.
+   */
+  async settleArbiterFee(escrow: EscrowContract): Promise<EscrowContract> {
+    const t = escrow.payload;
+    if (!t.arbiterFee || Number(t.arbiterFee) <= 0) return escrow;
+    return this.locked(escrow.contractId, async () => {
+      const allocEv = await this.fundAllocation(t, { legId: 'arbiterFee', receiver: t.arbiter, amount: t.arbiterFee! });
+      return this.settleAllocation(escrow.contractId, 'SettleArbiterFee', allocEv, 'execute-transfer', [t.arbiter]);
+    });
+  }
+
   /** Serialize value-moving operations per escrow: reject a second settle while one is in flight. */
   private async locked<T>(cid: ContractId, fn: () => Promise<T>): Promise<T> {
     if (this.inFlight.has(cid)) throw new Error(`settlement already in progress for ${cid.slice(0, 16)}…`);
@@ -133,9 +156,14 @@ export class EscrowService {
     try { return await fn(); } finally { this.inFlight.delete(cid); }
   }
 
-  /** Fund the escrow's payment leg: the requester locks `amount` of the instrument into a
-   *  CIP-0056 Allocation via the registry factory. Returns the created allocation event. */
-  private async fundAllocation(t: TaskEscrow): Promise<CreatedEvent> {
+  /** Fund one leg of the escrow's settlement (payment by default): the requester locks the
+   *  leg amount into a CIP-0056 Allocation via the registry factory. The constructed spec
+   *  must EXACTLY match the corresponding view leg (the contract asserts it on settlement).
+   *  Returns the created allocation event. */
+  private async fundAllocation(
+    t: TaskEscrow,
+    legOverride?: { legId: string; receiver: Party; amount: string },
+  ): Promise<CreatedEvent> {
     const settleBefore = plusSeconds(t.deadline, 86_400);
     const settlement = {
       executor: t.provider,
@@ -143,11 +171,12 @@ export class EscrowService {
       requestedAt: t.createdAt, allocateBefore: t.deadline, settleBefore,
       meta: emptyMeta(),
     };
-    const leg = { sender: t.requester, receiver: t.worker, amount: t.amount, instrumentId: t.instrumentId, meta: emptyMeta() };
+    const legSpec = legOverride ?? { legId: 'taskPayment', receiver: t.worker, amount: t.amount };
+    const leg = { sender: t.requester, receiver: legSpec.receiver, amount: legSpec.amount, instrumentId: t.instrumentId, meta: emptyMeta() };
     const inputs = (await this.ledger.amuletHoldings(t.requester)).map((h) => h.contractId);
     const args: Record<string, unknown> = {
       expectedAdmin: t.instrumentId.admin,
-      allocation: { settlement, transferLegId: 'taskPayment', transferLeg: leg },
+      allocation: { settlement, transferLegId: legSpec.legId, transferLeg: leg },
       requestedAt: t.createdAt, inputHoldingCids: inputs,
       extraArgs: { context: { values: {} }, meta: emptyMeta() },
     };

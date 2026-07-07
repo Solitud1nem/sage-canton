@@ -24,7 +24,7 @@ module TaskEscrow where
 
 import DA.Time (addRelTime, hours)
 import DA.TextMap qualified as TextMap
-import DA.Optional (fromSome)
+import DA.Optional (fromSome, isSome)
 import DA.Assert ((===))
 
 import Splice.Api.Token.MetadataV1 (ExtraArgs, ChoiceExecutionMetadata(..), emptyMetadata)
@@ -32,23 +32,31 @@ import Splice.Api.Token.HoldingV1 (InstrumentId)
 import Splice.Api.Token.AllocationV1
 import Splice.Api.Token.AllocationRequestV1
 
--- | Identifier of the single payment leg in this escrow's settlement.
+-- | Identifier of the worker-payment leg in this escrow's settlement.
 taskPaymentLegId : Text
 taskPaymentLegId = "taskPayment"
 
--- | Assert that a funded allocation is EXACTLY the one this escrow requested (same
--- transfer leg and same settlement info). Every value-moving choice must run this before
--- touching the allocation: the escrow's signatories contribute requester/provider
+-- | Identifier of the arbiter's verification-fee leg (present only when @arbiterFee@ is set).
+arbiterFeeLegId : Text
+arbiterFeeLegId = "arbiterFee"
+
+-- | Assert that a funded allocation is EXACTLY the one this escrow requested for the given
+-- leg (same transfer leg and same settlement info). Every value-moving choice must run this
+-- before touching the allocation: the escrow's signatories contribute requester/provider
 -- authority to the allocation exercise, so without this check a choice on escrow A could
 -- act on an allocation funded for escrow B (same requester) — settling/refunding the
 -- wrong lock and desynchronizing both escrows' states.
-assertAllocationMatches : TaskEscrow -> ContractId Allocation -> Update ()
-assertAllocationMatches escrow allocationCid = do
+assertAllocationMatchesLeg : Text -> TaskEscrow -> ContractId Allocation -> Update ()
+assertAllocationMatchesLeg legId escrow allocationCid = do
   allocView <- fmap (view @Allocation) (fetch allocationCid)
   let reqView     = view (toInterface @AllocationRequest escrow)
-      expectedLeg = fromSome (TextMap.lookup taskPaymentLegId reqView.transferLegs)
+      expectedLeg = fromSome (TextMap.lookup legId reqView.transferLegs)
   expectedLeg        === allocView.allocation.transferLeg
   reqView.settlement === allocView.allocation.settlement
+
+-- | The payment-leg specialisation used by every worker/refund settlement choice.
+assertAllocationMatches : TaskEscrow -> ContractId Allocation -> Update ()
+assertAllocationMatches = assertAllocationMatchesLeg taskPaymentLegId
 
 -- | Lifecycle states, mirroring the Sage EVM TaskEscrow enum.
 data TaskStatus
@@ -78,6 +86,10 @@ template TaskEscrow
                                    --   (None for a top-level / standalone task). Links child escrows
                                    --   to their orchestrating parent ON-LEDGER, so each sub-task keeps
                                    --   its own private stakeholder set + independent settlement.
+    arbiterFee   : Optional Decimal -- ^ verification fee (same instrument) the arbiter earns for
+                                    --   rendering a verdict — paid on BOTH outcomes via its own
+                                    --   transfer leg + `SettleArbiterFee`. Optional (appended last)
+                                    --   for smart-contract-upgrade compatibility with pre-fee escrows.
   where
     signatory provider, requester
     observer worker, arbiter
@@ -212,8 +224,29 @@ template TaskEscrow
         _ <- exercise allocationCid (Allocation_ExecuteTransfer with extraArgs)
         create this with status = Paid
 
+    -- | Pay the arbiter's verification fee — the value-moving acknowledgement that a verdict
+    -- was rendered. Claimable from EITHER terminal outcome (Paid or Refunded): the
+    -- fact-checker is paid for checking, not for which way the ruling went (a fee only on
+    -- one outcome would bias the referee). Controller arbiter: `Allocation_ExecuteTransfer`
+    -- needs executor+sender+receiver authority; provider+requester contribute theirs as
+    -- escrow signatories, the arbiter is the fee receiver. Consuming + recreate keeps the
+    -- escrow state unchanged apart from the contract id.
+    choice SettleArbiterFee : ContractId TaskEscrow
+      with
+        allocationCid : ContractId Allocation
+        extraArgs     : ExtraArgs
+      controller arbiter
+      do
+        assertMsg "no arbiter fee configured on this escrow" (isSome arbiterFee)
+        assertMsg "fee is claimable only after a verdict (Paid or Refunded)"
+          (status == Paid || status == Refunded)
+        assertAllocationMatchesLeg arbiterFeeLegId this allocationCid
+        _ <- exercise allocationCid (Allocation_ExecuteTransfer with extraArgs)
+        create this
+
     -- | CIP-0056 AllocationRequest: the requester's wallet reads this to fund the task by
-    -- creating an `Allocation` (locking `amount` of `instrumentId`) for the worker.
+    -- creating an `Allocation` (locking `amount` of `instrumentId`) for the worker — plus,
+    -- when a fee is configured, a second leg locking the arbiter's verification fee.
     interface instance AllocationRequest for TaskEscrow where
       view = AllocationRequestView with
         settlement = SettlementInfo with
@@ -224,7 +257,7 @@ template TaskEscrow
           settleBefore   = deadline `addRelTime` hours 24
           meta          = emptyMetadata
         transferLegs = TextMap.fromList
-          [ ( taskPaymentLegId
+          ( ( taskPaymentLegId
             , TransferLeg with
                 sender       = requester
                 receiver     = worker
@@ -232,7 +265,19 @@ template TaskEscrow
                 instrumentId = instrumentId
                 meta         = emptyMetadata
             )
-          ]
+            :: case arbiterFee of
+                 Some fee ->
+                   [ ( arbiterFeeLegId
+                     , TransferLeg with
+                         sender       = requester
+                         receiver     = arbiter
+                         amount       = fee
+                         instrumentId = instrumentId
+                         meta         = emptyMetadata
+                     )
+                   ]
+                 None -> []
+          )
         meta = emptyMetadata
 
       allocationRequest_RejectImpl _ _ =

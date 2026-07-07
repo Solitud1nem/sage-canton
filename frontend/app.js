@@ -309,7 +309,7 @@ function taskEvents(t, kids) {
   if (p.status === 'Paid') {
     out.push(evt('agent', '🤖', name, ref, '', `Delivered the research${rep ? ` — <b>${rep.result.citations.length}</b> sources cited` : ''}.`, answerSub(rep, ref)));
     if (rep?.verdict) out.push(evt('checker', '⚖️', 'Fact-checker', ref, '', `All <b>${rep.verdict.checks.length} of ${rep.verdict.checks.length}</b> citations resolve — work verified.`, citesCard(rep.verdict.checks)));
-    out.push(evt('money', '💸', 'Settlement', ref, '', `Agent paid ${cc(p.amount)} — real Canton Coin, moved atomically with the escrow closing.`, logDetails(rep, ref)));
+    out.push(evt('money', '💸', 'Settlement', ref, '', `Agent paid ${cc(p.amount)} — real Canton Coin, moved atomically with the escrow closing.${rep?.arbiterFeePaid ? ` The fact-checker earned ${cc(rep.arbiterFeePaid)} for the verdict.` : ''}`, logDetails(rep, ref)));
   }
   if (p.status === 'Disputed') {
     out.push(evt('checker', '⚖️', 'Fact-checker', ref, '', `The result is <span class="neg">contested</span> — under arbiter review.`,
@@ -320,8 +320,9 @@ function taskEvents(t, kids) {
   if (p.status === 'Refunded') {
     const bad = rep?.verdict?.checks?.filter((c) => !c.ok);
     out.push(evt('checker', '⚖️', 'Fact-checker', ref, '',
-      bad?.length ? `Citation does <span class="neg">not resolve</span> — fabricated source. Task disputed, funds returned. <b>The agent got nothing.</b>`
-                  : `Task refunded — <b>the agent got nothing.</b>`,
+      (bad?.length ? `Citation does <span class="neg">not resolve</span> — fabricated source. Task disputed, funds returned. <b>The agent got nothing.</b>`
+                   : `Task refunded — <b>the agent got nothing.</b>`)
+      + (rep?.arbiterFeePaid ? ` The fact-checker still earned ${cc(rep.arbiterFeePaid)} — paid for the verdict, not the outcome.` : ''),
       citesCard(bad) + logDetails(rep, ref)));
   }
   if (p.status === 'Expired') {

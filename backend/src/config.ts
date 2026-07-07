@@ -61,7 +61,7 @@ const localnet: Config = {
   walletUser: env('WALLET_USER', 'app-user'),
   // sage-canton 0.2.1 main package (rebuild + update if the contract changes; or set via env).
   // 0.2.1 is an SCU-compatible upgrade of 0.2.0 — upload the new DAR before pointing here.
-  packageId: env('PACKAGE_ID', '018c4f4dfb322c4e6c24e8cc734b302a3c84b022a4778f71010f3e09be80661e'),
+  packageId: env('PACKAGE_ID', '9743dbd597aaf8f6d7ba5f4833dca6ac5c472b7253008993a93a92a0ac18c0db'),
   packageName: env('PACKAGE_NAME', 'sage-canton'),
   port: Number(env('PORT', '8088')),
   apiToken: env('API_TOKEN', ''),
@@ -92,7 +92,7 @@ const seaport: Config = {
   // The m2m user acts as our parties; override if the shared validator uses a different user id.
   adminUser: env('ADMIN_USER', 'validator-devnet-m2m'),
   walletUser: env('WALLET_USER', ''),
-  packageId: env('PACKAGE_ID', '018c4f4dfb322c4e6c24e8cc734b302a3c84b022a4778f71010f3e09be80661e'),
+  packageId: env('PACKAGE_ID', '9743dbd597aaf8f6d7ba5f4833dca6ac5c472b7253008993a93a92a0ac18c0db'),
   packageName: env('PACKAGE_NAME', 'sage-canton'),
   port: Number(env('PORT', '8088')),
   apiToken: env('API_TOKEN', ''),

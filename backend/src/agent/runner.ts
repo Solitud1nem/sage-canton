@@ -24,6 +24,7 @@ export interface TaskReport {
   resultHash: string;
   verdict: Verdict;
   outcome: 'paid' | 'refunded';
+  arbiterFeePaid?: string;   // fee actually paid to the fact-checker for this verdict
   status: string;
   log: string[];
 }
@@ -100,13 +101,31 @@ export class AgentRunner {
     if (verdict.pass) {
       esc = await this.svc.settle(esc);
       log.push(`settled — worker paid ${t.amount} ${t.instrumentId.id}`);
-      return { taskRef: t.taskRef, brief: theBrief, contractId: esc.contractId, result, resultHash, verdict, outcome: 'paid', status: esc.payload.status, log };
+      const fee = await this.payArbiterFee(esc, log);
+      return { taskRef: t.taskRef, brief: theBrief, contractId: esc.contractId, result, resultHash, verdict, outcome: 'paid', arbiterFeePaid: fee, status: esc.payload.status, log };
     }
     // failure: requester disputes, arbiter resolves against the worker -> refunded, no payout
     esc = await this.svc.dispute(esc.contractId, t.requester);
     esc = await this.svc.resolve(esc.contractId, t.arbiter, false);
     log.push('fact-check failed -> disputed -> arbiter refunded the requester; worker paid nothing');
-    return { taskRef: t.taskRef, brief: theBrief, contractId: esc.contractId, result, resultHash, verdict, outcome: 'refunded', status: esc.payload.status, log };
+    const fee = await this.payArbiterFee(esc, log);
+    return { taskRef: t.taskRef, brief: theBrief, contractId: esc.contractId, result, resultHash, verdict, outcome: 'refunded', arbiterFeePaid: fee, status: esc.payload.status, log };
+  }
+
+  /** The fact-checker's per-verdict fee — claimed on BOTH outcomes, so the referee has no
+   *  economic stake in which way it rules. A fee failure never fails the run: the worker's
+   *  settlement already landed, so log and move on. */
+  private async payArbiterFee(esc: EscrowContract, log: string[]): Promise<string | undefined> {
+    const fee = esc.payload.arbiterFee;
+    if (!fee || Number(fee) <= 0) return undefined;
+    try {
+      await this.svc.settleArbiterFee(esc);
+      log.push(`fact-checker paid its ${fee} ${esc.payload.instrumentId.id} verification fee (SettleArbiterFee)`);
+      return fee;
+    } catch (e) {
+      log.push(`arbiter fee claim failed (non-fatal): ${(e as Error).message.slice(0, 160)}`);
+      return undefined;
+    }
   }
 
   /**

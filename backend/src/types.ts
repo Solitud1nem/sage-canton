@@ -27,7 +27,8 @@ export interface TaskEscrow {
   createdAt: string;       // RFC3339
   deadline: string;        // RFC3339
   resultRef: string | null;
-  parentRef: string | null; // parent task's taskRef if this is a decomposition sub-task
+  parentRef: string | null;  // parent task's taskRef if this is a decomposition sub-task
+  arbiterFee: string | null; // verification fee (same instrument) the arbiter earns per verdict
 }
 
 // A TaskEscrow as seen on-ledger (payload + its contract id).

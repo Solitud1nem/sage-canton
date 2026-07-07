@@ -94,7 +94,7 @@ sage-canton/
 # 1. Daml model + tests (incl. real-token settlement on a mock Amulet registry)
 #    multi-package: the production DAR (daml/) and the Script tests (daml-tests/) are
 #    separate, so the uploaded DAR carries only the CIP-0056 interfaces (no test bloat).
-dpm install && dpm build --all && dpm test --package-root daml-tests   # 16 scripts green
+dpm install && dpm build --all && dpm test --package-root daml-tests   # 18 scripts green
 
 # 2. Live end-to-end on a real node (multi-validator + Canton Coin + wallet)
 #    bring up cn-quickstart LocalNet, then settle a TaskEscrow over HTTP:
@@ -114,7 +114,7 @@ verified LocalNet bring-up + the live-settlement runbook.
 
 A complete vertical slice, proven on a live Canton node:
 
-- **Daml model** — `TaskEscrow` lifecycle + CIP-0056 settlement; 16 Daml-Script tests green.
+- **Daml model** — `TaskEscrow` lifecycle + CIP-0056 settlement; 18 Daml-Script tests green.
 - **Real settlement** — worker paid in actual Canton Coin via the Allocation/DvP flow,
   on a live cn-quickstart node (USDCx is a config switch — [ADR-0017](docs/adr/0017-settlement-via-cip0056-token-standard.md)).
 - **Privacy, demonstrated** — a non-stakeholder party sees **0** escrows on the live ledger
