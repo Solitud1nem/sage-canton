@@ -27,7 +27,10 @@ let editingPlan = null;          // taskRef whose decomposition plan is being ed
 let refreshFailed = false;
 const briefs = {};               // taskRef -> research brief (off-ledger, UI-side)
 const running = {};              // taskRef -> sub-task count while the pipeline runs (0 = single agent)
-const fails = {};                // taskRef -> last pipeline error (cleared on retry)
+const fails = {};                // taskRef -> { net, msg } last pipeline error (cleared on retry/resync)
+// Network-class failure (backend unreachable) vs an HTTP rejection the server sent us.
+// Matters because a request that already REACHED the server keeps running there.
+const isNetErr = (e) => e instanceof TypeError || /failed to fetch|network|load failed/i.test(e?.message || '');
 const reports = {};              // taskRef -> last agent TaskReport
 const decomps = {};              // parent taskRef -> last DecompositionReport
 const plans = {};                // parent taskRef -> editable plan { live, items[] }
@@ -202,10 +205,19 @@ function taskEvents(t, kids) {
       ...(overdue(p) ? [chip('⌛ Expire', false, () => act(t, 'expire', { provider: session.provider }))] : []),
     ] : perspective === 'agents' ? [chip('Accept', true, () => act(t, 'accept', { worker: p.worker }))] : []) : ''));
 
-  // A pipeline run that died off-script (network, ledger error): say so — the action
-  // chips above are back, and a restored plan card (if any) allows a straight retry.
+  // A pipeline run that died off-script: say so. A server rejection means nothing ran —
+  // the chips above (or the restored plan card) offer a retry. A network drop is softer:
+  // the run may still be finishing server-side, so once the ledger shows any progress
+  // (children exist / status moved), drop the note and let the live state speak.
   if (fails[ref] && !busy) {
-    out.push(evt('gray', '⚠️', 'Pipeline', ref, '', `<span class="neg">Run failed:</span> ${esc(fails[ref])} — nothing was paid; you can retry.`));
+    const f = fails[ref];
+    if (f.net && (kids?.length || p.status !== 'Created')) {
+      delete fails[ref];
+    } else {
+      out.push(evt('gray', '⚠️', 'Pipeline', ref, '', f.net
+        ? `<span class="neg">Connection lost mid-run</span> — if the request reached the server, the run is finishing there; this feed resyncs automatically.`
+        : `<span class="neg">Run failed:</span> ${esc(f.msg)} — nothing was paid; you can retry.`));
+    }
   }
 
   // decomposition: plan under review / being edited / executed / children on-ledger
@@ -390,7 +402,7 @@ async function runAgent(t) {
     reports[ref] = rep;
     toast(rep.outcome === 'paid' ? `✅ verified — agent paid (${rep.verdict.summary})` : `⛔ ${rep.verdict.summary} → no payout`, rep.outcome !== 'paid');
   } catch (e) {
-    fails[ref] = e.message;
+    fails[ref] = { net: isNetErr(e), msg: e.message };
     toast(e.message, true);
   } finally {
     delete running[ref];
@@ -432,7 +444,7 @@ function planReviewHtml(t) {
     <div class="prow">
       <div class="pmain"><b>${esc(it.title)}</b>${it.brief ? `<div class="pbrief">${esc(it.brief)}</div>` : ''}</div>
       <span class="who2">${esc(agentName(it.worker))}</span>
-      <span class="cc">${esc(String(it.reward))} CC</span>
+      <span class="cc">${esc(fmtCC(it.reward))} CC</span>
     </div>`).join('');
   return `<div class="card">${rows}
     <div class="pi-foot"><span class="pi-total ${over ? 'over' : ''}">total ${total.toFixed(2)} / ${budget.toFixed(0)} CC${over ? ' — over budget' : ''}</span></div>
@@ -524,9 +536,14 @@ async function executePlan(t) {
     await refresh();
   } catch (e) {
     delete running[ref];
-    fails[ref] = e.message;
+    const net = isNetErr(e);
+    fails[ref] = { net, msg: e.message };
     toast(e.message, true);
-    editingPlan = ref; renderFeed(lastTasks); // restore the plan card so approve can be retried
+    // Server rejected the plan → nothing ran; restore the card so approve can be retried.
+    // A network drop must NOT restore it: an open card pauses polling, and the run may be
+    // finishing server-side — leave the feed live so it resyncs to the truth.
+    if (!net) editingPlan = ref;
+    renderFeed(lastTasks);
   }
 }
 
